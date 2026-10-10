@@ -1,0 +1,9 @@
+/target/
+*.flowwrite
+*.flowrite
+*.exe
+*.pdb
+*.tmp
+.env
+.env.*
+workspace.json
