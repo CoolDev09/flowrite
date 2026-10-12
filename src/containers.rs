@@ -1,4 +1,35 @@
 use super::*;
+
+fn copy_feedback_active(ctx: &egui::Context, id: egui::Id, now: f64) -> bool {
+    ctx.data(|d| d.get_temp::<f64>(id))
+        .is_some_and(|copied_at| now - copied_at < 1.5)
+}
+
+fn code_copy_control(ui: &mut egui::Ui, ctx: &egui::Context, block: &Block) -> egui::Response {
+    let id = egui::Id::new(("copied", block.id));
+    // Context accessors share a lock: never call ctx.input inside data_mut.
+    let now = ctx.input(|i| i.time);
+    let copied = copy_feedback_active(ctx, id, now);
+    let response = icons::control(
+        ui,
+        if copied { Icon::Check } else { Icon::Copy },
+        if copied { "Copied" } else { "Copy" },
+        if copied {
+            "Copied to clipboard"
+        } else {
+            "Copy code to clipboard"
+        },
+        true,
+        copied,
+    );
+    if response.clicked() {
+        ctx.copy_text(block.text.clone());
+        ctx.data_mut(|d| d.insert_temp(id, now));
+        ctx.request_repaint_after(std::time::Duration::from_millis(1500));
+    }
+    response
+}
+
 impl FlowriteApp {
     pub(super) fn container_editor(
         &mut self,
@@ -95,33 +126,7 @@ impl FlowriteApp {
                             {
                                 self.dirty = true;
                             }
-                            let copied = ctx
-                                .data(|d| {
-                                    d.get_temp::<f64>(egui::Id::new((
-                                        "copied",
-                                        self.blocks[index].id,
-                                    )))
-                                })
-                                .is_some_and(|t| ctx.input(|i| i.time) - t < 1.5);
-                            if icons::control(
-                                ui,
-                                if copied { Icon::Check } else { Icon::Copy },
-                                if copied { "Copied" } else { "Copy" },
-                                if copied { "Copied to clipboard" } else { "Copy code to clipboard" },
-                                true,
-                                copied,
-                            )
-                            .clicked()
-                            {
-                                ctx.copy_text(self.blocks[index].text.clone());
-                                ctx.data_mut(|d| {
-                                    d.insert_temp(
-                                        egui::Id::new(("copied", self.blocks[index].id)),
-                                        ctx.input(|i| i.time),
-                                    )
-                                });
-                                ctx.request_repaint_after(std::time::Duration::from_millis(1500));
-                            }
+                            code_copy_control(ui, ctx, &self.blocks[index]);
                         } else {
                             icons::menu(
                                 ui,
@@ -169,5 +174,129 @@ impl FlowriteApp {
                 .rect_filled(rect, 2.0, Color32::from_rgb(bar[0], bar[1], bar[2]));
         }
         result.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(
+        ctx: &egui::Context,
+        block: &Block,
+        time: f64,
+        events: Vec<egui::Event>,
+    ) -> (egui::FullOutput, egui::Response) {
+        let mut response = None;
+        let output = ctx.run(
+            egui::RawInput {
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    response = Some(code_copy_control(ui, ctx, block));
+                });
+            },
+        );
+        (output, response.unwrap())
+    }
+
+    fn click(position: Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    #[test]
+    fn copy_click_emits_exact_code_and_feedback_expires_per_block() {
+        let ctx = egui::Context::default();
+        let block = Block::new(
+            41,
+            BlockKind::Code,
+            "// 🦀 café\n\tprintln!(\"你好\");\n",
+        );
+        let (initial, response) = frame(&ctx, &block, 10.0, vec![]);
+        assert!(initial.platform_output.copied_text.is_empty());
+        let (output, response) = frame(&ctx, &block, 10.1, click(response.rect.center()));
+        assert!(response.clicked());
+        assert_eq!(output.platform_output.copied_text, block.text);
+        let id = egui::Id::new(("copied", block.id));
+        assert!(copy_feedback_active(&ctx, id, 10.2));
+        assert!(!copy_feedback_active(
+            &ctx,
+            egui::Id::new(("copied", 42_u64)),
+            10.2,
+        ));
+        assert!(!copy_feedback_active(&ctx, id, 11.7));
+        let (later, _) = frame(&ctx, &block, 11.7, vec![]);
+        assert!(later.platform_output.copied_text.is_empty());
+    }
+
+    #[test]
+    fn repeated_keyboard_copy_refreshes_feedback_without_changing_code() {
+        let ctx = egui::Context::default();
+        let block = Block::new(7, BlockKind::Code, "fn main() {}\n");
+        let (_, response) = frame(&ctx, &block, 1.0, vec![]);
+        for time in [1.1, 1.9] {
+            ctx.memory_mut(|memory| memory.request_focus(response.id));
+            let (output, activated) = frame(
+                &ctx,
+                &block,
+                time,
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(activated.clicked());
+            assert_eq!(output.platform_output.copied_text, "fn main() {}\n");
+            assert_eq!(
+                ctx.data(|data| data.get_temp::<f64>(egui::Id::new(("copied", 7_u64)))),
+                Some(time),
+            );
+        }
+        assert!(copy_feedback_active(
+            &ctx,
+            egui::Id::new(("copied", 7_u64)),
+            3.0,
+        ));
+        assert!(!copy_feedback_active(
+            &ctx,
+            egui::Id::new(("copied", 7_u64)),
+            3.5,
+        ));
+        assert_eq!(block.text, "fn main() {}\n");
+    }
+
+    #[test]
+    fn empty_code_copy_completes_without_a_panic_or_lockup() {
+        let ctx = egui::Context::default();
+        let block = Block::new(8, BlockKind::Code, "");
+        let (_, response) = frame(&ctx, &block, 2.0, vec![]);
+        let (output, response) = frame(&ctx, &block, 2.1, click(response.rect.center()));
+        assert!(response.clicked());
+        assert!(output.platform_output.copied_text.is_empty());
+        assert!(copy_feedback_active(
+            &ctx,
+            egui::Id::new(("copied", 8_u64)),
+            2.2,
+        ));
     }
 }

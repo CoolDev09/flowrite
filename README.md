@@ -2,9 +2,13 @@
 
 A native Rust writing workspace with a dark, Notion-inspired editor, a document home page, academic presets, and PDF/Markdown export.
 
-Current version: **0.2.3**. This includes the 0.2.0 implementation batch and the compatibility and icon-toolbar updates, not completion of the entire requested roadmap. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for finished work and remaining details.
+Current version: **0.2.4**. This includes the 0.2.0 implementation batch and the compatibility and icon-toolbar updates, not completion of the entire requested roadmap. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for finished work and remaining details.
 
-[Download flowrite 0.2.3 for Windows](https://github.com/CoolDev09/flowrite/releases/download/v0.2.3/flowrite-0.2.3.exe), or browse the [release notes and older versions](https://github.com/CoolDev09/flowrite/releases).
+[Download flowrite 0.2.4 for Windows](https://github.com/CoolDev09/flowrite/releases/download/v0.2.4/flowrite-0.2.4.exe), or browse the [release notes and older versions](https://github.com/CoolDev09/flowrite/releases).
+
+**0.2.4 Copy fix:** copying a code block no longer re-enters the UI context lock
+while recording the confirmation indicator. This fixes the app lockup on Copy;
+Unicode text, indentation, line breaks, and timed confirmation are preserved.
 
 **0.2.1 compatibility fix:** older library indexes that omit `next_id` now load
 normally. The counter is reconstructed from existing page/folder IDs. Loading
@@ -14,7 +18,7 @@ uses backward-compatible defaults. Newer-format protection is unchanged.
 
 ## Run and build
 
-Double-click the downloaded `flowrite-0.2.3.exe`. Rust is not needed to run the Windows executable. Windows may show a SmartScreen warning because the executable is unsigned.
+Double-click the downloaded `flowrite-0.2.4.exe`. Rust is not needed to run the Windows executable. Windows may show a SmartScreen warning because the executable is unsigned.
 
 Building requires stable Rust with the Windows MSVC toolchain, Visual Studio C++ build tools, and a Windows SDK:
 

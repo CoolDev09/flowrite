@@ -86,6 +86,13 @@ sidebar folders and a level-indented outline; current-section tracking remains.
 
 ## Verification
 
+The 0.2.4 code-block Copy fix passed all **66 tests**. Three new tests activate
+the actual Copy control by mouse and keyboard, check exact Unicode/whitespace
+clipboard output, repeated and empty copies, per-block confirmation, and its
+expiry. The timestamp is read before taking the context data write lock; there
+is no nested context access during the update. Clipboard output is verified
+through egui's platform output, not a native Windows clipboard inspection.
+
 The release build-asset ZIP has been checked against its archive checksum and
 all 25 member checksums. Five setup tests cover an isolated install, altered
 archives/files, unexpected entries, and path traversal. The source repository
