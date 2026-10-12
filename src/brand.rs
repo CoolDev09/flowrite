@@ -31,7 +31,7 @@ pub(super) fn logo(ui: &egui::Ui, rect: egui::Rect) {
     }
 }
 
-impl FlowWriteApp {
+impl FlowriteApp {
     pub(super) fn brand_button(&mut self, ui: &mut egui::Ui) {
         let (rect, response) = ui.allocate_exact_size(Vec2::new(134.0, 36.0), Sense::click());
         response.widget_info(|| {
@@ -44,9 +44,13 @@ impl FlowWriteApp {
             egui::Align2::LEFT_CENTER,
             "flowrite",
             FontId::proportional(21.0),
-            INK,
+            theme::current().ink,
         );
-        if response.on_hover_text("Back to your documents").clicked() {
+        if response
+            .on_hover_text("Back to your documents")
+            .hand()
+            .clicked()
+        {
             self.go_home();
         }
     }

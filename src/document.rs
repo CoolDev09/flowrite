@@ -12,10 +12,11 @@ pub(super) enum BlockKind {
     Code,
     Callout,
     Divider,
+    Image,
 }
 
 impl BlockKind {
-    pub(super) const ALL: [Self; 10] = [
+    pub(super) const ALL: [Self; 11] = [
         Self::Text,
         Self::Heading1,
         Self::Heading2,
@@ -26,22 +27,8 @@ impl BlockKind {
         Self::Code,
         Self::Callout,
         Self::Divider,
+        Self::Image,
     ];
-
-    pub(super) fn icon(self) -> &'static str {
-        match self {
-            Self::Text => "T",
-            Self::Heading1 => "H1",
-            Self::Heading2 => "H2",
-            Self::Bulleted => "•",
-            Self::Numbered => "1.",
-            Self::Todo => "☐",
-            Self::Quote => "❝",
-            Self::Code => "</>",
-            Self::Callout => "✦",
-            Self::Divider => "—",
-        }
-    }
 
     pub(super) fn label(self) -> &'static str {
         match self {
@@ -55,6 +42,7 @@ impl BlockKind {
             Self::Code => "Code",
             Self::Callout => "Callout",
             Self::Divider => "Divider",
+            Self::Image => "Image",
         }
     }
 
@@ -70,6 +58,7 @@ impl BlockKind {
             Self::Code => "A monospace code snippet",
             Self::Callout => "A coloured note",
             Self::Divider => "A visual break",
+            Self::Image => "An image in a preset frame",
         }
     }
 
@@ -88,6 +77,7 @@ impl BlockKind {
             Self::Code => "    ",
             Self::Callout => "> 💡 ",
             Self::Divider => "---",
+            Self::Image => "",
         }
     }
 }
@@ -97,6 +87,10 @@ pub(super) struct InlineStyle {
     pub(super) bold: bool,
     pub(super) italic: bool,
     pub(super) underline: bool,
+    #[serde(default)]
+    pub(super) color: Option<[u8; 3]>,
+    #[serde(default)]
+    pub(super) highlight: Option<[u8; 3]>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -116,6 +110,20 @@ pub(super) struct Block {
     pub(super) format: InlineStyle,
     #[serde(default)]
     pub(super) marks: Vec<FormatSpan>,
+    #[serde(default)]
+    pub(super) link_ids: Vec<(String, String)>,
+    #[serde(default)]
+    pub(super) indent: u8,
+    #[serde(default)]
+    pub(super) language: String,
+    #[serde(default = "default_wrap")]
+    pub(super) code_wrap: bool,
+    #[serde(default)]
+    pub(super) callout_kind: CalloutKind,
+    #[serde(default)]
+    pub(super) image: Option<crate::images::ImageAsset>,
+    #[serde(default)]
+    pub(super) background: Option<[u8; 3]>,
 }
 
 impl Block {
@@ -127,6 +135,13 @@ impl Block {
             checked: false,
             format: InlineStyle::default(),
             marks: Vec::new(),
+            link_ids: Vec::new(),
+            indent: 0,
+            language: String::new(),
+            code_wrap: true,
+            callout_kind: CalloutKind::default(),
+            image: None,
+            background: None,
         }
     }
 
@@ -178,6 +193,93 @@ impl Block {
     }
 }
 
+fn default_wrap() -> bool {
+    true
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub(super) enum CalloutKind {
+    #[default]
+    Note,
+    Tip,
+    Warning,
+    Important,
+    Neutral,
+}
+impl CalloutKind {
+    pub const ALL: [Self; 5] = [
+        Self::Note,
+        Self::Tip,
+        Self::Warning,
+        Self::Important,
+        Self::Neutral,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Note => "Note",
+            Self::Tip => "Tip",
+            Self::Warning => "Warning",
+            Self::Important => "Important",
+            Self::Neutral => "Neutral",
+        }
+    }
+    pub fn marker(self) -> &'static str {
+        match self {
+            Self::Note => "NOTE",
+            Self::Tip => "TIP",
+            Self::Warning => "WARNING",
+            Self::Important => "IMPORTANT",
+            Self::Neutral => "NOTE",
+        }
+    }
+    pub fn colors(self) -> ([u8; 3], [u8; 3]) {
+        crate::theme::current().callouts[match self {
+            Self::Note => 0,
+            Self::Tip => 1,
+            Self::Warning => 2,
+            Self::Important => 3,
+            Self::Neutral => 4,
+        }]
+    }
+}
+
+pub(super) fn list_marker(indent: u8, number: usize, bullet: bool) -> String {
+    if bullet {
+        return ["•", "◦", "▪"][indent as usize % 3].into();
+    }
+    match indent % 3 {
+        1 => format!(
+            "{}.",
+            char::from(b'a' + ((number.saturating_sub(1)) % 26) as u8)
+        ),
+        2 => {
+            let mut n = number;
+            let mut roman = String::new();
+            for (value, name) in [
+                (1000, "m"),
+                (900, "cm"),
+                (500, "d"),
+                (400, "cd"),
+                (100, "c"),
+                (90, "xc"),
+                (50, "l"),
+                (40, "xl"),
+                (10, "x"),
+                (9, "ix"),
+                (5, "v"),
+                (4, "iv"),
+                (1, "i"),
+            ] {
+                while n >= value {
+                    roman.push_str(name);
+                    n -= value;
+                }
+            }
+            format!("{roman}.")
+        }
+        _ => format!("{number}."),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(super) enum PaperFormat {
     Freeform,
@@ -203,17 +305,20 @@ pub(super) struct DocumentStyle {
     pub(super) line_spacing: f32,
     pub(super) margin_inches: f32,
     pub(super) first_line_indent_inches: f32,
+    #[serde(default)]
+    pub(super) page_color: Option<[u8; 3]>,
 }
 
 impl Default for DocumentStyle {
     fn default() -> Self {
         Self {
             paper_format: PaperFormat::Freeform,
-            font: "Segoe UI".to_owned(),
+            font: "Liberation Sans".to_owned(),
             font_size: 14.0,
             line_spacing: 1.45,
             margin_inches: 0.8,
             first_line_indent_inches: 0.0,
+            page_color: None,
         }
     }
 }
@@ -223,14 +328,14 @@ impl DocumentStyle {
         self.paper_format = format;
         match format {
             PaperFormat::Freeform => {
-                self.font = "Segoe UI".to_owned();
+                self.font = "Liberation Sans".to_owned();
                 self.font_size = 14.0;
                 self.line_spacing = 1.45;
                 self.margin_inches = 0.8;
                 self.first_line_indent_inches = 0.0;
             }
             PaperFormat::Apa | PaperFormat::Mla => {
-                self.font = "Times New Roman".to_owned();
+                self.font = "Liberation Serif".to_owned();
                 self.font_size = 12.0;
                 self.line_spacing = 2.0;
                 self.margin_inches = 1.0;

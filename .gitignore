@@ -7,3 +7,10 @@
 .env
 .env.*
 workspace.json
+/assets/icons/vendor/
+/assets/fonts/*.ttf
+/assets/nlprule/*.bin
+/assets/spelling/en_US.aff
+/assets/spelling/en_US.dic
+__pycache__/
+*.pyc

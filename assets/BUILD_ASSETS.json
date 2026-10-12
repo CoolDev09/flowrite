@@ -1,0 +1,31 @@
+{
+  "url": "https://github.com/CoolDev09/flowrite/releases/download/v0.2.3/flowrite-build-assets-0.2.3.zip",
+  "sha256": "7078697a197ca5c129edd4bc6d978ab8a9124f63a90581943468e4241c30a8f7",
+  "files": {
+    "fonts/AUTHORS": "b627404917ef824675cb24c32e2facd0b57650627955f3fc3d8a8863c5d0adfc",
+    "fonts/ChangeLog": "97d9c0c8ae7418fcb8f0f7711be28c92d6fe117895b3019ed455b0631451000a",
+    "fonts/LiberationMono-Bold.ttf": "bd62a0672d0b9b6710b01df434c80ad54fa5f0835207eb7b17b7a761463067bb",
+    "fonts/LiberationMono-BoldItalic.ttf": "79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130",
+    "fonts/LiberationMono-Italic.ttf": "605c01c711b44480a7508d349dfbf3264e81fa43d69e61cfa7d10b86e764c4d1",
+    "fonts/LiberationMono-Regular.ttf": "f2b83c763e8afd21709333370bed4774337fae82267937e2b5aea7e2fbd922c1",
+    "fonts/LiberationSans-Bold.ttf": "788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173",
+    "fonts/LiberationSans-BoldItalic.ttf": "698da70fc191cc5f33ad4d6d3fe830fe4624b898ea2e3169955928b7c491f1ee",
+    "fonts/LiberationSans-Italic.ttf": "e5bae5c4cde31f22142753855f4f8fb86da6ff39955ed3c0a11248b0d16948b0",
+    "fonts/LiberationSans-Regular.ttf": "76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8",
+    "fonts/LiberationSerif-Bold.ttf": "d754ba427cfe0bca54ae052384baa8f842da5bd6550ad4da024ac441e7a7d5ce",
+    "fonts/LiberationSerif-BoldItalic.ttf": "f17db8af71e24d2066b587546021d4f0b296be389512b658dec3c09affeb11a7",
+    "fonts/LiberationSerif-Italic.ttf": "0e3dea9f8d613e006ccfa62201f33e265d19167bd0907725c3e145368b04fc2e",
+    "fonts/LiberationSerif-Regular.ttf": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74",
+    "fonts/LICENSE": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b",
+    "fonts/README.md": "625a61d7e161cde3b1e9dd1ff8b7a86c251be536c34266bf1f1a9bd1c15c19e8",
+    "fonts/TODO": "0c9333c07734cb936d44c592d4cec039200c50ac2bd41869221dbcb9031559bc",
+    "nlprule/COPYING.txt": "95a62130965bddc821631fcec03abe97246f9130f11a8be6f47579f8bc016fc8",
+    "nlprule/en_rules.bin": "d8f9c4a5deb827f0e5eefe2594c0c640039b7fa7e026f95fa0599e506d816b5c",
+    "nlprule/en_tokenizer.bin": "e2b51e506aede495268ee05dee0b97956e768107f5bb5891585144a5ff2fd773",
+    "nlprule/README.md": "4032cd69706a2fc1b7031a3c1c2da99cc6f0433dcd7c6a3188ce79baf1cb8a24",
+    "spelling/en_US.aff": "e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e",
+    "spelling/en_US.dic": "f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647",
+    "spelling/README_en_US.txt": "168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371",
+    "spelling/README.md": "8fe3ac92f90e91f6a39c5681d2bf0cb491f69473d14344fccab88c3f7deb929f"
+  }
+}

@@ -1,7 +1,11 @@
 use super::*;
 
-impl FlowWriteApp {
+impl FlowriteApp {
+    #[cfg(test)]
     pub(super) fn markdown(&self) -> String {
+        self.markdown_with_images(&format!("{}_images", safe_filename(&self.title)))
+    }
+    fn markdown_with_images(&self, image_folder: &str) -> String {
         let mut output = format!("# {}\n\n", self.title.trim());
         if self.style.paper_format == PaperFormat::Mla {
             for value in [
@@ -16,19 +20,61 @@ impl FlowWriteApp {
             }
             output.push('\n');
         }
-        let mut number = 0;
+        let mut counters = [0usize; 7];
         for block in &self.blocks {
+            if block.kind == BlockKind::Image {
+                if self.settings.export.include_images {
+                    if let Some(asset) = &block.image {
+                        if images::safe_asset(&asset.name) {
+                            let alt = if asset.show_caption {
+                                asset.caption.replace(['[', ']'], "")
+                            } else {
+                                String::new()
+                            };
+                            output.push_str(&format!(
+                                "![{alt}](<{}>)\n\n",
+                                markdown_path(&format!(
+                                    "{image_folder}/image-{}-{}",
+                                    block.id, asset.name
+                                ))
+                            ));
+                        }
+                    }
+                }
+                continue;
+            }
             if block.kind == BlockKind::Divider {
                 output.push_str("---\n\n");
                 continue;
             }
             if block.kind == BlockKind::Numbered {
-                number += 1;
-            } else {
-                number = 0;
+                let level = block.indent.min(6) as usize;
+                counters[level] += 1;
+                counters[level + 1..].fill(0);
+            } else if !matches!(block.kind, BlockKind::Bulleted | BlockKind::Todo) {
+                counters.fill(0);
             }
+            let number = counters[block.indent.min(6) as usize];
             if block.kind == BlockKind::Code {
-                output.push_str(&format!("~~~\n{}\n~~~\n\n", block.text));
+                let longest = block
+                    .text
+                    .split(|c| c != '`')
+                    .map(str::len)
+                    .max()
+                    .unwrap_or(0);
+                let fence = "`".repeat((longest + 1).max(3));
+                output.push_str(&format!(
+                    "{fence}{}\n{}\n{fence}\n\n",
+                    block.language, block.text
+                ));
+                continue;
+            }
+            if block.kind == BlockKind::Callout {
+                output.push_str(&format!("> [!{}]\n", block.callout_kind.marker()));
+                for line in markdown_inline(block).lines() {
+                    output.push_str(&format!("> {line}\n"));
+                }
+                output.push('\n');
                 continue;
             }
             let prefix = match block.kind {
@@ -42,11 +88,12 @@ impl FlowWriteApp {
                 BlockKind::Numbered => format!("{number}. "),
                 _ => block.kind.markdown_prefix(1).to_owned(),
             };
+            output.push_str(&"  ".repeat(block.indent.min(6) as usize));
             output.push_str(&prefix);
             output.push_str(&markdown_inline(block));
             output.push_str("\n\n");
         }
-        let citations = sorted_citations(&self.citations);
+        let citations = self.citation_entries();
         if !citations.is_empty() {
             output.push_str(&format!("## {}\n\n", self.citations_heading()));
             for citation in citations {
@@ -62,24 +109,90 @@ impl FlowWriteApp {
             ExportTarget::Markdown => ("Export Markdown", "md", "Markdown"),
             ExportTarget::Pdf => ("Export PDF", "pdf", "PDF"),
         };
-        let Some(path) = FileDialog::new()
-            .set_title(title)
-            .set_file_name(format!("{}.{}", safe_filename(&self.title), extension))
-            .add_filter(filter, &[extension])
-            .save_file()
-        else {
+        let name = format!("{}.{}", safe_filename(&self.title), extension);
+        let default = self.settings.general.folder.join(&name);
+        let path = if self.settings.general.ask_export || default.exists() {
+            FileDialog::new()
+                .set_title(title)
+                .set_directory(&self.settings.general.folder)
+                .set_file_name(name)
+                .add_filter(filter, &[extension])
+                .save_file()
+        } else {
+            std::fs::create_dir_all(&self.settings.general.folder).ok();
+            Some(default)
+        };
+        let Some(path) = path else {
             return;
         };
         let result = match target {
-            ExportTarget::Markdown => {
-                std::fs::write(&path, self.markdown()).map_err(|e| e.to_string())
-            }
+            ExportTarget::Markdown => self.write_markdown(&path),
             ExportTarget::Pdf => self.write_pdf(&path).map_err(|e| e.to_string()),
         };
-        self.notice = Some(match result {
-            Ok(()) => format!("Exported {}", path.display()),
-            Err(error) => format!("Could not export: {error}"),
-        });
+        match result {
+            Ok(()) => {
+                self.exported_path = Some(path.clone());
+                if self.settings.export.toast {
+                    self.notice = Some(format!(
+                        "Exported {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
+                if self.settings.export.auto_open {
+                    settings_ui::open_path(&path);
+                }
+                if let Some(parent) = path.parent() {
+                    self.settings.general.folder = parent.to_owned();
+                    let _ = self.settings.save(&self.workspace.directory);
+                }
+            }
+            Err(error) => self.notice = Some(format!("Could not export: {error}")),
+        }
+    }
+
+    fn write_markdown(&self, path: &Path) -> Result<(), String> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let base = format!(
+            "{}_images",
+            path.file_stem().unwrap_or_default().to_string_lossy()
+        );
+        let mut folder = base.clone();
+        let mut suffix = 2;
+        while parent.join(&folder).exists() {
+            folder = format!("{base}-{suffix}");
+            suffix += 1;
+        }
+        let mut assets = Vec::new();
+        if self.settings.export.include_images {
+            for block in &self.blocks {
+                if let Some(asset) = &block.image {
+                    if asset.name.is_empty() {
+                        continue;
+                    }
+                    if !images::safe_asset(&asset.name) {
+                        return Err("Unsafe image asset name".into());
+                    }
+                    assets.push((
+                        format!("image-{}-{}", block.id, asset.name),
+                        images::framed_image(
+                            &images::asset_directory(&self.workspace, &self.active_document)
+                                .join(&asset.name),
+                            asset.frame,
+                        )?,
+                    ));
+                }
+            }
+        }
+        if !assets.is_empty() {
+            std::fs::create_dir(parent.join(&folder)).map_err(|e| e.to_string())?;
+            for (name, image) in assets {
+                image
+                    .save(parent.join(&folder).join(name))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        workspace::write_atomic(path, self.markdown_with_images(&folder).as_bytes())
+            .map_err(|e| e.to_string())
     }
 
     pub(super) fn write_pdf(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,22 +257,46 @@ impl FlowWriteApp {
                 pdf.y -= pdf.line_height;
             }
         }
-        let mut number = 0;
+        let mut counters = [0usize; 7];
         for block in &self.blocks {
+            if block.kind == BlockKind::Image {
+                if self.settings.export.include_images {
+                    if let Some(asset) = &block.image {
+                        if !asset.name.is_empty() {
+                            if !images::safe_asset(&asset.name) {
+                                return Err("Unsafe image asset name".into());
+                            }
+                            pdf.image(
+                                asset,
+                                &images::asset_directory(&self.workspace, &self.active_document)
+                                    .join(&asset.name),
+                            )?;
+                        }
+                    }
+                }
+                continue;
+            }
             if block.kind == BlockKind::Divider {
                 pdf.ensure_space();
-                pdf.rule(pdf.margin, 215.9 - pdf.margin, pdf.y);
+                pdf.rule(pdf.margin, pdf.page_width - pdf.margin, pdf.y);
                 pdf.y -= pdf.line_height;
                 continue;
             }
             if block.kind == BlockKind::Numbered {
-                number += 1;
-            } else {
-                number = 0;
+                let level = block.indent.min(6) as usize;
+                counters[level] += 1;
+                counters[level + 1..].fill(0);
+            } else if !matches!(block.kind, BlockKind::Bulleted | BlockKind::Todo) {
+                counters.fill(0);
+            }
+            let number = counters[block.indent.min(6) as usize];
+            if matches!(block.kind, BlockKind::Code | BlockKind::Callout) {
+                pdf.container(block);
+                continue;
             }
             let prefix = match block.kind {
-                BlockKind::Bulleted => "• ".to_owned(),
-                BlockKind::Numbered => format!("{number}. "),
+                BlockKind::Bulleted => format!("{} ", list_marker(block.indent, number, true)),
+                BlockKind::Numbered => format!("{} ", list_marker(block.indent, number, false)),
                 BlockKind::Todo => {
                     if block.checked {
                         "[x] ".to_owned()
@@ -167,7 +304,6 @@ impl FlowWriteApp {
                         "[ ] ".to_owned()
                     }
                 }
-                BlockKind::Callout => "NOTE: ".to_owned(),
                 _ => String::new(),
             };
             let mut styles = vec![plain; prefix.chars().count()];
@@ -187,19 +323,22 @@ impl FlowWriteApp {
             } else {
                 0.0
             };
+            let list_indent = block.indent.min(6) as f32 * 6.35;
+            pdf.block_background = block.background;
             pdf.paragraph(
                 &format!("{prefix}{}", block.text),
                 &styles,
                 size,
-                indent,
-                0.0,
+                indent + list_indent,
+                list_indent,
                 false,
             );
+            pdf.block_background = None;
             if self.style.paper_format == PaperFormat::Freeform {
                 pdf.y -= pdf.line_height * 0.35;
             }
         }
-        let citations = sorted_citations(&self.citations);
+        let citations = self.citation_entries();
         if !citations.is_empty() {
             pdf.new_page();
             pdf.line_height = self.style.font_size * 2.0 * 25.4 / 72.0;
@@ -218,7 +357,14 @@ impl FlowWriteApp {
                 true,
             );
             for citation in citations {
-                pdf.paragraph(&citation, &[], self.style.font_size, 0.0, 12.7, false);
+                pdf.paragraph(
+                    &citation,
+                    &[],
+                    self.style.font_size,
+                    0.0,
+                    self.settings.citations.hanging_inches * 25.4,
+                    false,
+                );
             }
         }
         pdf.document
@@ -238,42 +384,39 @@ struct Paper {
     margin: f32,
     y: f32,
     line_height: f32,
+    page_width: f32,
+    page_height: f32,
+    running_header: bool,
+    page_colors: bool,
+    mono: bool,
+    background: [u8; 3],
+    ink: [u8; 3],
+    block_background: Option<[u8; 3]>,
 }
 
 impl Paper {
-    fn new(app: &FlowWriteApp) -> Result<Self, Box<dyn std::error::Error>> {
-        let (document, page, layer) =
-            PdfDocument::new(&app.title, Mm(215.9), Mm(279.4), "Document");
-        let files = match app.style.font.as_str() {
-            "Times New Roman" => ["times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf"],
-            "Consolas" => [
-                "consola.ttf",
-                "consolab.ttf",
-                "consolai.ttf",
-                "consolaz.ttf",
-            ],
-            "Arial" => ["arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf"],
-            _ => [
-                "segoeui.ttf",
-                "segoeuib.ttf",
-                "segoeuii.ttf",
-                "segoeuiz.ttf",
-            ],
+    fn new(app: &FlowriteApp) -> Result<Self, Box<dyn std::error::Error>> {
+        let (page_width, page_height) = if app.settings.export.a4 {
+            (210.0, 297.0)
+        } else {
+            (215.9, 279.4)
         };
-        let fallbacks = [
-            BuiltinFont::TimesRoman,
-            BuiltinFont::TimesBold,
-            BuiltinFont::TimesItalic,
-            BuiltinFont::TimesBoldItalic,
-        ];
+        let (document, page, layer) =
+            PdfDocument::new(&app.title, Mm(page_width), Mm(page_height), "Document");
         let mut fonts = Vec::new();
-        for (index, file) in files.iter().enumerate() {
-            fonts.push(
-                match File::open(Path::new("C:\\Windows\\Fonts").join(file)) {
-                    Ok(file) => document.add_external_font(file)?,
-                    Err(_) => document.add_builtin_font(fallbacks[index])?,
-                },
-            );
+        for (bold, italic) in [(false, false), (true, false), (false, true), (true, true)] {
+            fonts.push(document.add_external_font(std::io::Cursor::new(fonts::data(
+                &app.style.font,
+                bold,
+                italic,
+            )))?);
+        }
+        for (bold, italic) in [(false, false), (true, false), (false, true), (true, true)] {
+            fonts.push(document.add_external_font(std::io::Cursor::new(fonts::data(
+                "Liberation Mono",
+                bold,
+                italic,
+            )))?);
         }
         let metrics = egui::Context::default();
         configure_fonts(&metrics);
@@ -290,9 +433,29 @@ impl Paper {
             surname: app.details.last_name.clone(),
             number: 1,
             margin,
-            y: 279.4 - margin - app.style.font_size * 25.4 / 72.0,
+            y: page_height - margin - app.style.font_size * 25.4 / 72.0,
             line_height: app.style.font_size * app.style.line_spacing * 25.4 / 72.0,
+            page_width,
+            page_height,
+            running_header: app.settings.citations.running_header
+                && app.settings.export.page_numbers,
+            page_colors: app.settings.export.page_colors,
+            mono: false,
+            background: if app.settings.export.page_colors {
+                app.style
+                    .page_color
+                    .unwrap_or(app.theme.canvas.to_array()[..3].try_into().unwrap())
+            } else {
+                [255, 255, 255]
+            },
+            ink: if app.settings.export.page_colors {
+                app.theme.ink.to_array()[..3].try_into().unwrap()
+            } else {
+                [0, 0, 0]
+            },
+            block_background: None,
         };
+        result.rectangle(0.0, 0.0, page_width, page_height, result.background);
         result.header();
         Ok(result)
     }
@@ -310,14 +473,27 @@ impl Paper {
             / 72.0
     }
     fn draw(&self, text: &str, size: f32, x: f32, y: f32, style: InlineStyle) {
-        let index = usize::from(style.bold) + 2 * usize::from(style.italic);
+        let index =
+            usize::from(style.bold) + 2 * usize::from(style.italic) + if self.mono { 4 } else { 0 };
+        let width = self.width(text, size, style);
+        if self.page_colors {
+            if let Some(color) = style.highlight {
+                self.rectangle(x, y - 1.0, width, size * 25.4 / 72.0 * 1.2, color);
+            }
+        }
+        self.layer.set_fill_color(pdf_color(if self.page_colors {
+            style.color.unwrap_or(self.ink)
+        } else {
+            [0, 0, 0]
+        }));
         self.layer
             .use_text(text, size, Mm(x), Mm(y), &self.fonts[index]);
         if style.underline {
-            self.rule(x, x + self.width(text, size, style), y - 0.7);
+            self.rule(x, x + width, y - 0.7);
         }
     }
     fn rule(&self, x1: f32, x2: f32, y: f32) {
+        self.layer.set_outline_color(pdf_color(self.ink));
         self.layer.set_outline_thickness(0.5);
         self.layer.add_line(printpdf::Line {
             points: vec![
@@ -328,7 +504,7 @@ impl Paper {
         });
     }
     fn header(&mut self) {
-        if self.style.paper_format == PaperFormat::Freeform {
+        if self.style.paper_format == PaperFormat::Freeform || !self.running_header {
             return;
         }
         let text = if self.style.paper_format == PaperFormat::Mla && !self.surname.is_empty() {
@@ -341,22 +517,219 @@ impl Paper {
         self.draw(
             &text,
             12.0,
-            215.9 - self.margin - width,
-            279.4 - 12.7,
+            self.page_width - self.margin - width,
+            self.page_height - 12.7,
             style,
         );
     }
     fn new_page(&mut self) {
-        let (page, layer) = self.document.add_page(Mm(215.9), Mm(279.4), "Document");
+        let (page, layer) =
+            self.document
+                .add_page(Mm(self.page_width), Mm(self.page_height), "Document");
         self.layer = self.document.get_page(page).get_layer(layer);
+        self.rectangle(0.0, 0.0, self.page_width, self.page_height, self.background);
         self.number += 1;
-        self.y = 279.4 - self.margin - self.style.font_size * 25.4 / 72.0;
+        self.y = self.page_height - self.margin - self.style.font_size * 25.4 / 72.0;
         self.header();
     }
     fn ensure_space(&mut self) {
         if self.y < self.margin {
             self.new_page();
         }
+    }
+    fn rectangle(&self, x: f32, y: f32, width: f32, height: f32, color: [u8; 3]) {
+        self.layer.set_fill_color(pdf_color(color));
+        self.layer.add_polygon(printpdf::Polygon {
+            rings: vec![vec![
+                (printpdf::Point::new(Mm(x), Mm(y)), false),
+                (printpdf::Point::new(Mm(x + width), Mm(y)), false),
+                (printpdf::Point::new(Mm(x + width), Mm(y + height)), false),
+                (printpdf::Point::new(Mm(x), Mm(y + height)), false),
+            ]],
+            mode: printpdf::path::PaintMode::Fill,
+            ..Default::default()
+        });
+    }
+    fn rounded_box(&self, x: f32, y: f32, width: f32, height: f32, color: [u8; 3]) {
+        let radius = 2.0_f32.min(height / 2.0);
+        let mut points = Vec::new();
+        for (cx, cy, angle) in [
+            (x + width - radius, y + radius, -std::f32::consts::FRAC_PI_2),
+            (x + width - radius, y + height - radius, 0.0),
+            (x + radius, y + height - radius, std::f32::consts::FRAC_PI_2),
+            (x + radius, y + radius, std::f32::consts::PI),
+        ] {
+            for i in 0..=8 {
+                let a = angle + i as f32 * std::f32::consts::FRAC_PI_2 / 8.0;
+                points.push((
+                    printpdf::Point::new(Mm(cx + radius * a.cos()), Mm(cy + radius * a.sin())),
+                    false,
+                ));
+            }
+        }
+        self.layer.set_fill_color(pdf_color(color));
+        self.layer.set_outline_color(pdf_color([190, 190, 190]));
+        self.layer.set_outline_thickness(0.4);
+        self.layer.add_polygon(printpdf::Polygon {
+            rings: vec![points],
+            mode: printpdf::path::PaintMode::FillStroke,
+            ..Default::default()
+        });
+    }
+    fn container(&mut self, block: &Block) {
+        let code = block.kind == BlockKind::Code;
+        let font = self.style.font.clone();
+        let original_height = self.line_height;
+        if code {
+            self.style.font = "Liberation Mono".into();
+            self.mono = true;
+        }
+        let size = if code {
+            self.style.font_size.min(12.0)
+        } else {
+            self.style.font_size
+        };
+        self.line_height = size * 1.5 * 25.4 / 72.0;
+        let padding = 6.35;
+        let width = self.page_width - 2.0 * self.margin;
+        self.y -= padding + size * 25.4 / 72.0;
+        let styles = block.character_styles();
+        let job = text_layout::job(
+            &block.text,
+            block.format,
+            &block.marks,
+            &self.style,
+            block.kind,
+            size,
+            (width - 2.0 * padding) * 72.0 / 25.4,
+            &[],
+        );
+        let galley = self.metrics.fonts(|fonts| fonts.layout_job(job));
+        let mut offset = 0;
+        let mut row_index = 0;
+        while row_index < galley.rows.len() {
+            let available = ((self.y - self.margin - padding) / self.line_height)
+                .floor()
+                .max(0.0) as usize;
+            if available == 0 {
+                self.new_page();
+                self.y -= padding;
+                continue;
+            }
+            let count = available.min(galley.rows.len() - row_index);
+            let height = count as f32 * self.line_height + 2.0 * padding;
+            let top = self.y + size * 25.4 / 72.0 + padding;
+            let (bar, mut tint) = if code {
+                ([140, 140, 140], [243, 243, 243])
+            } else {
+                let (bar, _) = block.callout_kind.colors();
+                (bar, [246, 247, 249])
+            };
+            if self.page_colors {
+                tint = block.background.unwrap_or(if code {
+                    [32, 34, 38]
+                } else {
+                    block.callout_kind.colors().1
+                });
+            }
+            self.rounded_box(self.margin, top - height, width, height, tint);
+            if !code {
+                self.rectangle(self.margin, top - height + 2.0, 1.4, height - 4.0, bar);
+            }
+            for row in &galley.rows[row_index..row_index + count] {
+                let mut x = self.margin + padding;
+                let mut run = String::new();
+                let mut last = InlineStyle::default();
+                for glyph in &row.glyphs {
+                    let style = styles.get(offset).copied().unwrap_or_default();
+                    if !run.is_empty() && style != last {
+                        self.draw(&run, size, x, self.y, last);
+                        x += self.width(&run, size, last);
+                        run.clear();
+                    }
+                    run.push(glyph.chr);
+                    last = style;
+                    offset += 1;
+                }
+                if !run.is_empty() {
+                    self.draw(&run, size, x, self.y, last);
+                }
+                offset += usize::from(row.ends_with_newline);
+                self.y -= self.line_height;
+            }
+            self.y -= padding * 2.0;
+            row_index += count;
+        }
+        if galley.rows.is_empty() {
+            self.rounded_box(self.margin, self.y - 10.0, width, 15.0, [243, 243, 243]);
+            self.y -= 20.0;
+        }
+        self.style.font = font;
+        self.mono = false;
+        self.line_height = original_height;
+    }
+    fn image(
+        &mut self,
+        asset: &images::ImageAsset,
+        path: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let image = images::framed_image(path, asset.frame).map_err(std::io::Error::other)?;
+        let ratio = image.width() as f32 / image.height() as f32;
+        let available = self.page_width - 2.0 * self.margin;
+        let mut width = match asset.frame {
+            images::ImageFrame::Inline => available.min(137.6),
+            images::ImageFrame::Circle => available.min(74.0),
+            images::ImageFrame::Square | images::ImageFrame::Rounded => available.min(111.0),
+            _ => available,
+        };
+        let max_height = self.page_height - 2.0 * self.margin - self.line_height * 2.0;
+        let mut height = width / ratio;
+        if height > max_height {
+            height = max_height;
+            width = height * ratio;
+        }
+        if self.y - height - self.line_height < self.margin {
+            self.new_page();
+        }
+        // Flatten alpha against the print page; printpdf 0.7's mask path has
+        // incorrect dimensions for non-square images.
+        let mut rgb = Vec::with_capacity(image.width() as usize * image.height() as usize * 3);
+        for pixel in image.pixels() {
+            for (index, &channel) in pixel.0[..3].iter().enumerate() {
+                rgb.push(
+                    ((channel as u32 * pixel[3] as u32
+                        + self.background[index] as u32 * (255 - pixel[3] as u32))
+                        / 255) as u8,
+                );
+            }
+        }
+        let object = printpdf::ImageXObject {
+            width: printpdf::Px(image.width() as usize),
+            height: printpdf::Px(image.height() as usize),
+            color_space: printpdf::ColorSpace::Rgb,
+            bits_per_component: printpdf::ColorBits::Bit8,
+            interpolate: true,
+            image_data: rgb,
+            image_filter: None,
+            smask: None,
+            clipping_bbox: None,
+        };
+        printpdf::Image::from(object).add_to_layer(
+            self.layer.clone(),
+            printpdf::ImageTransform {
+                translate_x: Some(Mm(self.margin)),
+                translate_y: Some(Mm(self.y - height)),
+                scale_x: Some(width / (image.width() as f32 * 25.4 / 300.0)),
+                scale_y: Some(height / (image.height() as f32 * 25.4 / 300.0)),
+                dpi: Some(300.0),
+                ..Default::default()
+            },
+        );
+        self.y -= height + self.line_height;
+        if asset.show_caption && !asset.caption.is_empty() {
+            self.paragraph(&asset.caption, &[], self.style.font_size, 0.0, 0.0, true);
+        }
+        Ok(())
     }
     fn paragraph(
         &mut self,
@@ -372,32 +745,36 @@ impl Paper {
             self.y -= self.line_height;
             return;
         }
+        let factor = 25.4 / 72.0;
+        let mut job = egui::text::LayoutJob::default();
+        job.wrap.max_width = (self.page_width - 2.0 * self.margin - rest_indent) / factor;
         let mut start = 0;
-        let mut first = true;
         while start < chars.len() {
-            let indent = if first { first_indent } else { rest_indent };
-            let limit = 215.9 - 2.0 * self.margin - indent;
-            let mut end = start;
-            let mut last_space = None;
-            let mut width = 0.0;
-            while end < chars.len() && chars[end] != '\n' {
-                let style = styles.get(end).copied().unwrap_or_default();
-                let next = self.width(&chars[end].to_string(), size, style);
-                if width + next > limit && end > start {
-                    break;
-                }
-                width += next;
-                if chars[end].is_whitespace() {
-                    last_space = Some(end);
-                }
+            let style = styles.get(start).copied().unwrap_or_default();
+            let mut end = start + 1;
+            while end < chars.len() && styles.get(end).copied().unwrap_or_default() == style {
                 end += 1;
             }
-            if end < chars.len() && chars[end] != '\n' {
-                if let Some(space) = last_space.filter(|space| *space > start) {
-                    end = space;
-                }
-            }
-            let mut line_end = end;
+            job.append(
+                &chars[start..end].iter().collect::<String>(),
+                if start == 0 {
+                    (first_indent - rest_indent) / factor
+                } else {
+                    0.0
+                },
+                egui::TextFormat {
+                    font_id: editor_ui::document_font(&self.style, style, size),
+                    color: Color32::BLACK,
+                    ..Default::default()
+                },
+            );
+            start = end;
+        }
+        let galley = self.metrics.fonts(|fonts| fonts.layout_job(job));
+        let mut start = 0;
+        for row in &galley.rows {
+            let end = start + row.glyphs.len();
+            let mut line_end = end.min(chars.len());
             while line_end > start && chars[line_end - 1].is_whitespace() {
                 line_end -= 1;
             }
@@ -413,27 +790,39 @@ impl Paper {
             }
             let width: f32 = runs.iter().map(|(t, s)| self.width(t, size, *s)).sum();
             let mut x = if center {
-                (215.9 - width) / 2.0
+                (self.page_width - width) / 2.0
             } else {
-                self.margin + indent
+                self.margin + rest_indent + row.rect.left() * factor
             };
             self.ensure_space();
+            if self.page_colors {
+                if let Some(color) = self.block_background {
+                    self.rectangle(
+                        self.margin,
+                        self.y - 1.0,
+                        self.page_width - 2.0 * self.margin,
+                        self.line_height,
+                        color,
+                    );
+                }
+            }
             for (text, style) in runs {
                 self.draw(&text, size, x, self.y, style);
                 x += self.width(&text, size, style);
             }
             self.y -= self.line_height.max(size * 25.4 / 72.0 * 1.2);
-            start = end.max(start + 1);
-            if start < chars.len() && chars[start] == '\n' {
-                start += 1;
-            } else {
-                while start < chars.len() && chars[start] == ' ' {
-                    start += 1;
-                }
-            }
-            first = false;
+            start = end + usize::from(row.ends_with_newline);
         }
     }
+}
+
+fn pdf_color(color: [u8; 3]) -> printpdf::Color {
+    printpdf::Color::Rgb(printpdf::Rgb::new(
+        color[0] as f32 / 255.0,
+        color[1] as f32 / 255.0,
+        color[2] as f32 / 255.0,
+        None,
+    ))
 }
 
 fn markdown_inline(block: &Block) -> String {
@@ -447,7 +836,7 @@ fn markdown_inline(block: &Block) -> String {
             output.push_str(&format!(
                 "[{}](<{}.md>)",
                 link.title,
-                safe_filename(&link.title)
+                markdown_path(&safe_filename(&link.title))
             ));
             index = link.end;
             continue;
@@ -458,6 +847,14 @@ fn markdown_inline(block: &Block) -> String {
             end += 1;
         }
         let text: String = chars[index..end].iter().collect();
+        let trimmed = text.trim();
+        let leading = text.len() - text.trim_start().len();
+        let trailing = text.trim_end().len();
+        output.push_str(&text[..leading]);
+        if trimmed.is_empty() {
+            index = end;
+            continue;
+        }
         if style.underline {
             output.push_str("<u>");
         }
@@ -467,7 +864,7 @@ fn markdown_inline(block: &Block) -> String {
         if style.italic {
             output.push('*');
         }
-        output.push_str(&text);
+        output.push_str(trimmed);
         if style.italic {
             output.push('*');
         }
@@ -477,9 +874,14 @@ fn markdown_inline(block: &Block) -> String {
         if style.underline {
             output.push_str("</u>");
         }
+        output.push_str(&text[trailing..]);
         index = end;
     }
     output
+}
+
+fn markdown_path(path: &str) -> String {
+    path.replace('%', "%25").replace('#', "%23")
 }
 
 pub(super) fn safe_filename(title: &str) -> String {
@@ -487,14 +889,26 @@ pub(super) fn safe_filename(title: &str) -> String {
         .trim()
         .chars()
         .map(|c| match c {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-            c if c.is_control() => '_',
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            c if c.is_control() => ' ',
             _ => c,
         })
         .collect();
     let cleaned = cleaned.trim_end_matches(['.', ' ']);
+    let stem = cleaned.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(prefix)
+                .is_some_and(|n| n.len() == 1 && matches!(n.as_bytes()[0], b'1'..=b'9'))
+        });
     if cleaned.is_empty() {
         "untitled-document".to_owned()
+    } else if reserved {
+        let (stem, extension) = cleaned
+            .split_once('.')
+            .map(|(s, e)| (s, format!(".{e}")))
+            .unwrap_or((cleaned, String::new()));
+        format!("{stem}-document{extension}")
     } else {
         cleaned.to_owned()
     }
@@ -504,8 +918,74 @@ pub(super) fn safe_filename(title: &str) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn structured_blocks_and_images_export_together() {
+        let mut app = FlowriteApp::empty();
+        let directory = std::env::var_os("FLOWRITE_SAMPLE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("flowrite-export-{}", workspace::timestamp()))
+            });
+        std::fs::create_dir_all(&directory).unwrap();
+        app.workspace.directory = directory.join("isolated-library");
+        app.dirty = true;
+        app.commit_current();
+        app.title = "Block export review".into();
+        app.blocks=vec![Block::new(1,BlockKind::Text,"A paragraph above a callout, code container, nested list, and cropped image."),Block::new(2,BlockKind::Callout,"Check that this note has a distinct container, comfortable padding, and readable text. This paragraph wraps across several lines to verify the print layout."),Block::new(3,BlockKind::Code,"fn main() {\n    println!(\"Hello, flowrite!\");\n}"),Block::new(4,BlockKind::Numbered,"Parent item"),Block::new(5,BlockKind::Numbered,"Child item"),Block::new(6,BlockKind::Numbered,"Second child"),Block::new(7,BlockKind::Numbered,"Next parent"),Block::new(8,BlockKind::Image,"")];
+        app.blocks[2].language = "rust".into();
+        app.blocks[4].indent = 1;
+        app.blocks[5].indent = 1;
+        app.blocks[7].image = Some(images::ImageAsset {
+            name: "sample.png".into(),
+            frame: images::ImageFrame::Circle,
+            caption: "Figure 1. Center-cropped circular sample.".into(),
+            show_caption: true,
+        });
+        let assets = images::asset_directory(&app.workspace, &app.active_document);
+        std::fs::create_dir_all(&assets).unwrap();
+        image::RgbaImage::from_fn(240, 120, |x, y| {
+            image::Rgba([(x * 255 / 240) as u8, (y * 255 / 120) as u8, 160, 255])
+        })
+        .save(assets.join("sample.png"))
+        .unwrap();
+        let pdf = directory.join("Block-export.pdf");
+        app.write_pdf(&pdf).unwrap();
+        assert!(std::fs::read(pdf).unwrap().starts_with(b"%PDF"));
+        app.settings.export.page_colors = true;
+        app.style.page_color = Some([27, 29, 32]);
+        app.blocks[0].format.color = Some([222, 183, 120]);
+        let dark_pdf = directory.join("Block-export-dark.pdf");
+        app.write_pdf(&dark_pdf).unwrap();
+        assert!(std::fs::read(dark_pdf).unwrap().starts_with(b"%PDF"));
+        let md = directory.join("Block-export.md");
+        app.write_markdown(&md).unwrap();
+        let text = std::fs::read_to_string(md).unwrap();
+        assert!(text.contains("  1. Child item"));
+        assert!(text.contains("  2. Second child"));
+        assert!(text.contains("2. Next parent"));
+        assert!(text.contains("```rust"));
+        assert!(text.contains("> [!NOTE]"));
+        let link = text
+            .split("](<")
+            .nth(1)
+            .unwrap()
+            .split(">)")
+            .next()
+            .unwrap();
+        assert!(link.starts_with("Block-export_images"));
+        let exported = image::open(directory.join(link)).unwrap().to_rgba8();
+        assert_eq!(exported.dimensions(), (120, 120));
+        assert_eq!(exported.get_pixel(0, 0)[3], 0);
+    }
+    #[test]
+    fn windows_reserved_names_are_safe() {
+        assert_eq!(safe_filename("Needed/Fixes"), "Needed-Fixes");
+        assert_eq!(safe_filename("CON"), "CON-document");
+        assert_eq!(safe_filename("LPT1.txt"), "LPT1-document.txt");
+        assert_eq!(safe_filename("   ..."), "untitled-document");
+    }
+    #[test]
     fn mla_export_includes_a_separate_citation_page() {
-        let mut app = FlowWriteApp::empty();
+        let mut app = FlowriteApp::empty();
         app.title = "An Example MLA Essay".into();
         app.style.apply_preset(PaperFormat::Mla);
         app.details = PaperDetails {
@@ -520,13 +1000,13 @@ mod tests {
             .map(|id| Block::new(id, BlockKind::Text, paragraph))
             .collect();
         app.citations=vec!["Williams, Clara. The Art of Thoughtful Writing: An Introduction to Essays, Revision, and Research. Example Press, 2024.".into(),"Adams, Jordan. Reading the Everyday: Essays on Language, Culture, and the Stories We Tell. Sample University Press, 2023.".into()];
-        let directory = std::env::var_os("FLOWWRITE_SAMPLE_DIR")
+        let directory = std::env::var_os("FLOWRITE_SAMPLE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
         let path = directory.join("MLA-example.pdf");
         app.write_pdf(&path).unwrap();
         assert!(std::fs::read(&path).unwrap().starts_with(b"%PDF"));
-        if std::env::var_os("FLOWWRITE_SAMPLE_DIR").is_some() {
+        if std::env::var_os("FLOWRITE_SAMPLE_DIR").is_some() {
             std::fs::write(
                 directory.join("MLA-example.flowwrite"),
                 serde_json::to_vec_pretty(&app.local_document()).unwrap(),
@@ -539,12 +1019,12 @@ mod tests {
     }
     #[test]
     fn markdown_keeps_links_styles_and_alphabetized_citations() {
-        let mut app = FlowWriteApp::empty();
+        let mut app = FlowriteApp::empty();
         app.blocks[0].text = "Read [[Research notes]]".into();
         app.blocks[0].format.bold = true;
         app.citations = vec!["Zulu. A book.".into(), "Adams. Another book.".into()];
         let result = app.markdown();
-        assert!(result.contains("**Read **[Research notes](<Research notes.md>)"));
+        assert!(result.contains("**Read** [Research notes](<Research notes.md>)"));
         assert!(result.find("Adams.").unwrap() < result.find("Zulu.").unwrap());
         assert!(result.contains("## Works Cited"));
     }
