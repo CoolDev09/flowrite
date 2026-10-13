@@ -139,7 +139,23 @@ impl FlowriteApp {
             BlockKind::Bulleted | BlockKind::Numbered | BlockKind::Todo | BlockKind::Code
         ) {
             let tab = ctx.input_mut(|i| {
-                let shift = i.modifiers.shift;
+                // A quick chord can release Shift before the next UI frame.
+                // Use the Tab event's modifiers, not the final modifier snapshot.
+                let shift = i
+                    .events
+                    .iter()
+                    .find_map(|event| match event {
+                        egui::Event::Key {
+                            key: egui::Key::Tab,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => {
+                            Some(modifiers.shift)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(false);
                 i.consume_key(
                     if shift {
                         egui::Modifiers::SHIFT
@@ -152,20 +168,45 @@ impl FlowriteApp {
             });
             if let Some(shift) = tab {
                 if kind == BlockKind::Code {
-                    self.insert_at(index, cursor, cursor, "    ");
+                    if shift {
+                        let chars: Vec<_> = self.blocks[index].text.chars().collect();
+                        let line_start = chars[..cursor]
+                            .iter()
+                            .rposition(|&c| c == '\n')
+                            .map_or(0, |p| p + 1);
+                        let remove = if chars.get(line_start) == Some(&'\t') {
+                            1
+                        } else {
+                            chars[line_start..]
+                                .iter()
+                                .take(4)
+                                .take_while(|&&c| c == ' ')
+                                .count()
+                        };
+                        if remove > 0 {
+                            self.insert_at(index, line_start, line_start + remove, "");
+                            self.focus_request = Some((
+                                self.blocks[index].id,
+                                cursor.saturating_sub(remove).max(line_start),
+                            ));
+                        }
+                    } else {
+                        let [start, end] = range.sorted();
+                        self.insert_at(index, start.index, end.index, "    ");
+                    }
                 } else if shift {
                     self.blocks[index].indent = self.blocks[index].indent.saturating_sub(1);
                     self.dirty = true;
-                } else if index > 0
-                    && matches!(
-                        self.blocks[index - 1].kind,
-                        BlockKind::Bulleted | BlockKind::Numbered | BlockKind::Todo
-                    )
-                {
-                    self.blocks[index].indent = (self.blocks[index].indent + 1)
-                        .min(self.blocks[index - 1].indent + 1)
-                        .min(6);
+                } else {
+                    self.blocks[index].indent = (self.blocks[index].indent + 1).min(6);
                     self.dirty = true;
+                }
+                // Tab belongs to the editor, not egui's next-widget traversal.
+                ctx.memory_mut(|m| m.request_focus(widget));
+                if kind != BlockKind::Code {
+                    let mut state = TextEdit::load_state(ctx, widget).unwrap_or_default();
+                    state.cursor.set_char_range(Some(range));
+                    state.store(ctx, widget);
                 }
                 self.force_history = true;
                 return;

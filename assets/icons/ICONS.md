@@ -56,3 +56,6 @@ with `scripts/prepare_icons.py` and the official npm archive before building.
 | file-import.svg | fi-rr-file-import | Flaticon | Regular Rounded 3.3.1 |
 | arrow-up.svg | fi-rr-arrow-up | Flaticon | Regular Rounded 3.3.1 |
 | arrow-down.svg | fi-rr-arrow-down | Flaticon | Regular Rounded 3.3.1 |
+| home.svg | fi-rr-home | Flaticon | Regular Rounded 3.3.1 |
+| file-pdf.svg | fi-rr-file-pdf | Flaticon | Regular Rounded 3.3.1 |
+| apps.svg | fi-rr-apps | Flaticon | Regular Rounded 3.3.1 |

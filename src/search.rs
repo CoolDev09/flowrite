@@ -117,7 +117,7 @@ impl FlowriteApp {
                     .inner_margin(Margin::symmetric(22.0, 7.0)),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Find");
                     let edit = ui.add(
                         TextEdit::singleline(&mut self.find_query)
@@ -168,7 +168,7 @@ impl FlowriteApp {
                     }
                 });
                 if self.search.replace {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("Replace with");
                         ui.add(
                             TextEdit::singleline(&mut self.search.replacement).desired_width(230.0),

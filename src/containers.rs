@@ -22,6 +22,10 @@ fn code_copy_control(ui: &mut egui::Ui, ctx: &egui::Context, block: &Block) -> e
         true,
         copied,
     );
+    #[cfg(test)]
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new(("code_copy_bounds", block.id)), response.rect)
+    });
     if response.clicked() {
         ctx.copy_text(block.text.clone());
         ctx.data_mut(|d| d.insert_temp(id, now));
@@ -85,40 +89,53 @@ impl FlowriteApp {
                     ui.set_width((width - 32.0).max(100.0));
                     ui.horizontal(|ui| {
                         if kind == BlockKind::Code {
-                            egui::ComboBox::from_id_salt(("language", self.blocks[index].id))
-                                .selected_text(if self.blocks[index].language.is_empty() {
-                                    "Plain text"
-                                } else {
-                                    &self.blocks[index].language
-                                })
-                                .show_ui(ui, |ui| {
-                                    for (label, name) in [
-                                        ("Plain text", ""),
-                                        ("Rust", "rust"),
-                                        ("Python", "python"),
-                                        ("JavaScript", "javascript"),
-                                        ("TypeScript", "typescript"),
-                                        ("HTML", "html"),
-                                        ("CSS", "css"),
-                                        ("JSON", "json"),
-                                        ("SQL", "sql"),
-                                        ("Bash", "bash"),
-                                    ] {
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.blocks[index].language,
-                                                name.into(),
-                                                label,
-                                            )
-                                            .hand()
-                                            .changed()
-                                        {
-                                            self.dirty = true;
+                            let response =
+                                egui::ComboBox::from_id_salt(("language", self.blocks[index].id))
+                                    .selected_text(if self.blocks[index].language.is_empty() {
+                                        "Plain text"
+                                    } else {
+                                        &self.blocks[index].language
+                                    })
+                                    .show_ui(ui, |ui| {
+                                        for (label, name) in [
+                                            ("Plain text", ""),
+                                            ("Rust", "rust"),
+                                            ("Python", "python"),
+                                            ("JavaScript", "javascript"),
+                                            ("TypeScript", "typescript"),
+                                            ("HTML", "html"),
+                                            ("CSS", "css"),
+                                            ("JSON", "json"),
+                                            ("SQL", "sql"),
+                                            ("Bash", "bash"),
+                                        ] {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.blocks[index].language,
+                                                    name.into(),
+                                                    label,
+                                                )
+                                                .hand()
+                                                .changed()
+                                            {
+                                                self.dirty = true;
+                                            }
                                         }
+                                    })
+                                    .response
+                                    .hand();
+                            design::named(
+                                response,
+                                egui::WidgetType::ComboBox,
+                                &format!(
+                                    "Code language: {}",
+                                    if self.blocks[index].language.is_empty() {
+                                        "Plain text"
+                                    } else {
+                                        &self.blocks[index].language
                                     }
-                                })
-                                .response
-                                .hand();
+                                ),
+                            );
                             if ui
                                 .checkbox(&mut self.blocks[index].code_wrap, "Wrap")
                                 .hand()
@@ -126,7 +143,9 @@ impl FlowriteApp {
                             {
                                 self.dirty = true;
                             }
-                            code_copy_control(ui, ctx, &self.blocks[index]);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                code_copy_control(ui, ctx, &self.blocks[index]);
+                            });
                         } else {
                             icons::menu(
                                 ui,
@@ -181,6 +200,46 @@ impl FlowriteApp {
 mod tests {
     use super::*;
 
+    #[test]
+    fn copy_is_in_the_code_header_right_corner_and_still_copies() {
+        for width in [280.0, 500.0, 780.0] {
+            let ctx = egui::Context::default();
+            configure_fonts(&ctx);
+            let mut app = FlowriteApp::empty();
+            app.blocks = vec![Block::new(
+                1,
+                BlockKind::Code,
+                "print(\"café Ω\")\n    print(\"second line\")",
+            )];
+            let mut render = |events| {
+                let mut body = egui::Rect::NOTHING;
+                let output = ctx.run(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            body = app.container_editor(ui, ctx, 0, width).rect;
+                        });
+                    },
+                );
+                (output, body)
+            };
+            let (_, body) = render(vec![]);
+            let copy = ctx
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("code_copy_bounds", 1u64))))
+                .unwrap();
+            assert!(copy.top() < body.top());
+            assert!(
+                (copy.right() - body.right()).abs() <= 8.0,
+                "Copy isn't right-aligned: {copy:?} vs {body:?}"
+            );
+            let (output, _) = render(click(copy.center()));
+            assert_eq!(output.platform_output.copied_text, app.blocks[0].text);
+        }
+    }
+
     fn frame(
         ctx: &egui::Context,
         block: &Block,
@@ -224,11 +283,7 @@ mod tests {
     #[test]
     fn copy_click_emits_exact_code_and_feedback_expires_per_block() {
         let ctx = egui::Context::default();
-        let block = Block::new(
-            41,
-            BlockKind::Code,
-            "// 🦀 café\n\tprintln!(\"你好\");\n",
-        );
+        let block = Block::new(41, BlockKind::Code, "// 🦀 café\n\tprintln!(\"你好\");\n");
         let (initial, response) = frame(&ctx, &block, 10.0, vec![]);
         assert!(initial.platform_output.copied_text.is_empty());
         let (output, response) = frame(&ctx, &block, 10.1, click(response.rect.center()));

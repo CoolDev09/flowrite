@@ -411,13 +411,16 @@ impl FlowriteApp {
             .as_ref()
             .is_some_and(|i| i.show_caption)
         {
-            if ui
-                .add(
+            if design::named(
+                ui.add(
                     TextEdit::singleline(&mut self.blocks[index].image.as_mut().unwrap().caption)
                         .hint_text("Figure caption…")
                         .desired_width(frame_width),
-                )
-                .changed()
+                ),
+                egui::WidgetType::TextEdit,
+                "Image caption",
+            )
+            .changed()
             {
                 self.dirty = true;
             }

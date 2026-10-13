@@ -30,7 +30,7 @@ NAMES = ["arrow-left", "arrow-right", "trash", "search", "disk", "settings",
          "plus", "menu-dots", "file-export", "folder", "folder-open", "pencil",
          "bold", "italic", "underline", "interlining", "document", "book",
          "check", "code-simple", "heading", "horizontal-rule", "layout-fluid",
-         "palette", "file-import", "arrow-up", "arrow-down"]
+         "palette", "file-import", "arrow-up", "arrow-down", "home", "file-pdf", "apps"]
 with tarfile.open(args.archive) as archive:
     # Extract known regular files only, never arbitrary archive paths/symlinks.
     def read(name):

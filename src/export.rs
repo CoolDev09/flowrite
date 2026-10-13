@@ -6,7 +6,10 @@ impl FlowriteApp {
         self.markdown_with_images(&format!("{}_images", safe_filename(&self.title)))
     }
     fn markdown_with_images(&self, image_folder: &str) -> String {
-        let mut output = format!("# {}\n\n", self.title.trim());
+        let mut output = format!(
+            "# {}\n\n",
+            markdown_escape(&self.title.lines().collect::<Vec<_>>().join(" ").trim())
+        );
         if self.style.paper_format == PaperFormat::Mla {
             for value in [
                 &self.details.author,
@@ -15,19 +18,26 @@ impl FlowriteApp {
                 &self.details.due_date,
             ] {
                 if !value.is_empty() {
-                    output.push_str(&format!("{value}  \n"));
+                    output.push_str(&format!("{}  \n", markdown_escape(value)));
                 }
             }
             output.push('\n');
         }
         let mut counters = [0usize; 7];
+        let mut content_columns = [0usize; 7];
+        let mut list_kinds = [None; 7];
         for block in &self.blocks {
             if block.kind == BlockKind::Image {
+                counters.fill(0);
+                content_columns.fill(0);
+                list_kinds.fill(None);
                 if self.settings.export.include_images {
                     if let Some(asset) = &block.image {
                         if images::safe_asset(&asset.name) {
                             let alt = if asset.show_caption {
-                                asset.caption.replace(['[', ']'], "")
+                                markdown_escape(
+                                    &asset.caption.lines().collect::<Vec<_>>().join(" "),
+                                )
                             } else {
                                 String::new()
                             };
@@ -44,15 +54,23 @@ impl FlowriteApp {
                 continue;
             }
             if block.kind == BlockKind::Divider {
+                counters.fill(0);
+                content_columns.fill(0);
+                list_kinds.fill(None);
                 output.push_str("---\n\n");
                 continue;
             }
             if block.kind == BlockKind::Numbered {
                 let level = block.indent.min(6) as usize;
+                if list_kinds[level] != Some(BlockKind::Numbered) {
+                    counters[level] = 0;
+                }
                 counters[level] += 1;
                 counters[level + 1..].fill(0);
             } else if !matches!(block.kind, BlockKind::Bulleted | BlockKind::Todo) {
                 counters.fill(0);
+                content_columns.fill(0);
+                list_kinds.fill(None);
             }
             let number = counters[block.indent.min(6) as usize];
             if block.kind == BlockKind::Code {
@@ -88,16 +106,57 @@ impl FlowriteApp {
                 BlockKind::Numbered => format!("{number}. "),
                 _ => block.kind.markdown_prefix(1).to_owned(),
             };
-            output.push_str(&"  ".repeat(block.indent.min(6) as usize));
-            output.push_str(&prefix);
-            output.push_str(&markdown_inline(block));
+            let level = block.indent.min(6) as usize;
+            let list = matches!(
+                block.kind,
+                BlockKind::Bulleted | BlockKind::Numbered | BlockKind::Todo
+            );
+            let indentation = if list && level > 0 {
+                content_columns[level - 1]
+            } else {
+                0
+            };
+            if list {
+                content_columns[level] = indentation
+                    + if block.kind == BlockKind::Numbered {
+                        prefix.len()
+                    } else {
+                        2
+                    };
+                content_columns[level + 1..].fill(0);
+                list_kinds[level] = Some(block.kind);
+                list_kinds[level + 1..].fill(None);
+            }
+            for (line_number, line) in markdown_inline(block).split('\n').enumerate() {
+                if line_number > 0 {
+                    output.push_str("  \n");
+                }
+                if list {
+                    output.push_str(&" ".repeat(if line_number == 0 {
+                        indentation
+                    } else {
+                        content_columns[level]
+                    }));
+                    if line_number == 0 {
+                        output.push_str(&prefix);
+                    }
+                } else if block.kind == BlockKind::Quote {
+                    output.push_str("> ");
+                } else if line_number == 0 {
+                    output.push_str(&prefix);
+                }
+                output.push_str(line);
+            }
             output.push_str("\n\n");
         }
         let citations = self.citation_entries();
         if !citations.is_empty() {
-            output.push_str(&format!("## {}\n\n", self.citations_heading()));
+            output.push_str(&format!(
+                "## {}\n\n",
+                markdown_escape(self.citations_heading())
+            ));
             for citation in citations {
-                output.push_str(&citation);
+                output.push_str(&markdown_escape(&citation));
                 output.push_str("\n\n");
             }
         }
@@ -150,7 +209,7 @@ impl FlowriteApp {
         }
     }
 
-    fn write_markdown(&self, path: &Path) -> Result<(), String> {
+    pub(super) fn write_markdown(&self, path: &Path) -> Result<(), String> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let base = format!(
             "{}_images",
@@ -297,13 +356,7 @@ impl FlowriteApp {
             let prefix = match block.kind {
                 BlockKind::Bulleted => format!("{} ", list_marker(block.indent, number, true)),
                 BlockKind::Numbered => format!("{} ", list_marker(block.indent, number, false)),
-                BlockKind::Todo => {
-                    if block.checked {
-                        "[x] ".to_owned()
-                    } else {
-                        "[ ] ".to_owned()
-                    }
-                }
+                BlockKind::Todo => String::new(),
                 _ => String::new(),
             };
             let mut styles = vec![plain; prefix.chars().count()];
@@ -323,8 +376,15 @@ impl FlowriteApp {
             } else {
                 0.0
             };
-            let list_indent = block.indent.min(6) as f32 * 6.35;
+            let list_indent = block.indent.min(6) as f32 * 6.35
+                + if matches!(block.kind, BlockKind::Quote | BlockKind::Todo) {
+                    6.35
+                } else {
+                    0.0
+                };
             pdf.block_background = block.background;
+            pdf.quote = block.kind == BlockKind::Quote;
+            pdf.task = (block.kind == BlockKind::Todo).then_some(block.checked);
             pdf.paragraph(
                 &format!("{prefix}{}", block.text),
                 &styles,
@@ -334,6 +394,8 @@ impl FlowriteApp {
                 false,
             );
             pdf.block_background = None;
+            pdf.quote = false;
+            pdf.task = None;
             if self.style.paper_format == PaperFormat::Freeform {
                 pdf.y -= pdf.line_height * 0.35;
             }
@@ -392,6 +454,8 @@ struct Paper {
     background: [u8; 3],
     ink: [u8; 3],
     block_background: Option<[u8; 3]>,
+    quote: bool,
+    task: Option<bool>,
 }
 
 impl Paper {
@@ -454,6 +518,8 @@ impl Paper {
                 [0, 0, 0]
             },
             block_background: None,
+            quote: false,
+            task: None,
         };
         result.rectangle(0.0, 0.0, page_width, page_height, result.background);
         result.header();
@@ -717,7 +783,7 @@ impl Paper {
         printpdf::Image::from(object).add_to_layer(
             self.layer.clone(),
             printpdf::ImageTransform {
-                translate_x: Some(Mm(self.margin)),
+                translate_x: Some(Mm((self.page_width - width) / 2.0)),
                 translate_y: Some(Mm(self.y - height)),
                 scale_x: Some(width / (image.width() as f32 * 25.4 / 300.0)),
                 scale_y: Some(height / (image.height() as f32 * 25.4 / 300.0)),
@@ -795,6 +861,54 @@ impl Paper {
                 self.margin + rest_indent + row.rect.left() * factor
             };
             self.ensure_space();
+            if self.quote {
+                self.rectangle(
+                    self.margin + rest_indent - 4.0,
+                    self.y - 1.0,
+                    0.6,
+                    self.line_height,
+                    [145, 145, 145],
+                );
+            }
+            if start == 0 {
+                if let Some(checked) = self.task {
+                    let left = self.margin + rest_indent - 5.4;
+                    let bottom = self.y - 0.2;
+                    self.layer.set_outline_color(pdf_color(self.ink));
+                    self.layer.set_outline_thickness(0.6);
+                    self.layer.add_line(printpdf::Line {
+                        points: vec![
+                            (printpdf::Point::new(Mm(left), Mm(bottom)), false),
+                            (printpdf::Point::new(Mm(left + 3.3), Mm(bottom)), false),
+                            (
+                                printpdf::Point::new(Mm(left + 3.3), Mm(bottom + 3.3)),
+                                false,
+                            ),
+                            (printpdf::Point::new(Mm(left), Mm(bottom + 3.3)), false),
+                        ],
+                        is_closed: true,
+                    });
+                    if checked {
+                        self.layer.add_line(printpdf::Line {
+                            points: vec![
+                                (
+                                    printpdf::Point::new(Mm(left + 0.5), Mm(bottom + 1.6)),
+                                    false,
+                                ),
+                                (
+                                    printpdf::Point::new(Mm(left + 1.3), Mm(bottom + 0.7)),
+                                    false,
+                                ),
+                                (
+                                    printpdf::Point::new(Mm(left + 2.8), Mm(bottom + 2.7)),
+                                    false,
+                                ),
+                            ],
+                            is_closed: false,
+                        });
+                    }
+                }
+            }
             if self.page_colors {
                 if let Some(color) = self.block_background {
                     self.rectangle(
@@ -835,7 +949,7 @@ fn markdown_inline(block: &Block) -> String {
         if let Some(link) = links.iter().find(|l| l.start == index) {
             output.push_str(&format!(
                 "[{}](<{}.md>)",
-                link.title,
+                markdown_escape(&link.title),
                 markdown_path(&safe_filename(&link.title))
             ));
             index = link.end;
@@ -864,7 +978,7 @@ fn markdown_inline(block: &Block) -> String {
         if style.italic {
             output.push('*');
         }
-        output.push_str(trimmed);
+        output.push_str(&markdown_escape(trimmed));
         if style.italic {
             output.push('*');
         }
@@ -878,6 +992,41 @@ fn markdown_inline(block: &Block) -> String {
         index = end;
     }
     output
+}
+
+fn markdown_escape(text: &str) -> String {
+    // Escape literal inline syntax; generated rich-text delimiters stay separate.
+    let mut result = String::with_capacity(text.len());
+    let mut leading_digits = true;
+    for character in text.chars() {
+        if matches!(
+            character,
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '['
+                | ']'
+                | '<'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '!'
+                | '|'
+                | '~'
+                | '&'
+        ) || (character == '.' && leading_digits)
+        {
+            result.push('\\');
+        }
+        result.push(character);
+        if character == '\n' {
+            leading_digits = true;
+        } else if !character.is_ascii_digit() && !character.is_whitespace() {
+            leading_digits = false;
+        }
+    }
+    result
 }
 
 fn markdown_path(path: &str) -> String {

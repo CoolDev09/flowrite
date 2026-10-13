@@ -134,8 +134,11 @@ impl FlowriteApp {
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 100.0))
-            .fixed_size(Vec2::new(520.0, 440.0))
+            .anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 64.0))
+            .fixed_size(Vec2::new(
+                (ctx.screen_rect().width() - 64.0).min(520.0),
+                (ctx.screen_rect().height() - 112.0).min(440.0),
+            ))
             .show(ctx, |ui| {
                 ui.label(
                     RichText::new("Search pages, folders, and actions")
@@ -157,7 +160,7 @@ impl FlowriteApp {
                 }
                 ui.separator();
                 egui::ScrollArea::vertical()
-                    .max_height(340.0)
+                    .max_height((ctx.screen_rect().height() - 220.0).min(340.0).max(100.0))
                     .show(ui, |ui| {
                         if items.is_empty() {
                             ui.label("No matching pages or commands.");
@@ -169,7 +172,7 @@ impl FlowriteApp {
                                     egui::Button::image_and_text(
                                         {
                                             let icon = match item {
-                                                Action::New => Icon::Document,
+                                                Action::New => Icon::Plus,
                                                 Action::Folder => Icon::Folder,
                                                 Action::Settings(_) => Icon::Settings,
                                                 Action::Find | Action::Replace => Icon::Search,

@@ -6,6 +6,7 @@ pub(super) enum PageAction {
     Rename(String),
     Duplicate(String),
     Move(String, Option<String>),
+    ChooseFolder(String),
     NewFolder(String),
     Export(String, ExportTarget),
     Delete(String),
@@ -25,6 +26,7 @@ pub(super) struct Dialogs {
     pub cancel_focus: bool,
     pub delete_pages: bool,
     pub move_after_create: Option<String>,
+    pub move_page: Option<String>,
 }
 
 pub(super) fn page_menu(ui: &mut egui::Ui, id: &str, workspace: &Workspace) -> Option<PageAction> {
@@ -43,7 +45,11 @@ pub(super) fn page_menu(ui: &mut egui::Ui, id: &str, workspace: &Workspace) -> O
         action = Some(PageAction::Duplicate(id.into()));
         ui.close_menu();
     }
-    icons::menu(ui, Icon::Folder, "Move to folder", |ui| {
+    if icons::labelled(ui, Icon::Folder, "Move to folder…").clicked() {
+        action = Some(PageAction::ChooseFolder(id.into()));
+        ui.close_menu();
+    }
+    icons::menu(ui, Icon::Folder, "Quick move", |ui| {
         if ui.button("No folder").hand().clicked() {
             action = Some(PageAction::Move(id.into(), None));
             ui.close_menu();
@@ -145,6 +151,7 @@ impl FlowriteApp {
                         }
                     }
                 }
+                PageAction::ChooseFolder(id) => self.dialogs.move_page = Some(id),
                 PageAction::NewFolder(id) => {
                     self.dialogs.move_after_create = Some(id);
                     self.begin_folder();
@@ -158,6 +165,46 @@ impl FlowriteApp {
                     self.dialogs.cancel_focus = true;
                     self.dialogs.delete_pages = false;
                 }
+            }
+        }
+        if let Some(id) = self.dialogs.move_page.clone() {
+            let mut open = true;
+            let mut cancel = false;
+            let mut action = None;
+            egui::Window::new("Move page to folder")
+                .open(&mut open)
+                .collapsible(false)
+                .default_width(300.0)
+                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.label("Choose where this page belongs.");
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            if icons::labelled(ui, Icon::Home, "No folder").clicked() {
+                                action = Some(PageAction::Move(id.clone(), None));
+                            }
+                            for folder in &self.workspace.folders {
+                                if icons::labelled(ui, Icon::Folder, &folder.name).clicked() {
+                                    action =
+                                        Some(PageAction::Move(id.clone(), Some(folder.id.clone())));
+                                }
+                            }
+                        });
+                    ui.separator();
+                    if icons::labelled(ui, Icon::Plus, "New folder…").clicked() {
+                        action = Some(PageAction::NewFolder(id.clone()));
+                    }
+                    if ui.button("Cancel").hand().clicked() {
+                        cancel = true;
+                    }
+                });
+            if let Some(action) = action {
+                self.dialogs.action = Some(action);
+                open = false;
+            }
+            if !open || cancel {
+                self.dialogs.move_page = None;
             }
         }
         if let Some((folder, id, mut name)) = self.dialogs.rename.clone() {

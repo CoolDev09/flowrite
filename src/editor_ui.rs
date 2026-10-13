@@ -10,13 +10,13 @@ enum BlockAction {
 }
 
 impl FlowriteApp {
-    fn active_index(&self) -> usize {
+    pub(super) fn active_index(&self) -> usize {
         self.focused_block
             .and_then(|id| self.blocks.iter().position(|b| b.id == id))
             .unwrap_or(0)
     }
 
-    fn request_action(&mut self, action: PendingAction, ctx: &egui::Context) {
+    pub(super) fn request_action(&mut self, action: PendingAction, ctx: &egui::Context) {
         if !self.active_document.is_empty() && self.save_workspace() {
             self.execute_action(action, ctx);
             return;
@@ -62,7 +62,7 @@ impl FlowriteApp {
         self.reset_history_baseline();
     }
 
-    fn undo(&mut self) {
+    pub(super) fn undo(&mut self) {
         if let Some(previous) = self.undo_stack.pop() {
             self.history_navigation = true;
             self.redo_stack.push(self.history_entry());
@@ -70,7 +70,7 @@ impl FlowriteApp {
         }
     }
 
-    fn redo(&mut self) {
+    pub(super) fn redo(&mut self) {
         if let Some(next) = self.redo_stack.pop() {
             self.history_navigation = true;
             self.undo_stack.push(self.history_entry());
@@ -78,7 +78,7 @@ impl FlowriteApp {
         }
     }
 
-    fn toggle_decoration(&mut self, decoration: Decoration, ctx: &egui::Context) {
+    pub(super) fn toggle_decoration(&mut self, decoration: Decoration, ctx: &egui::Context) {
         let index = self.active_index();
         let block = &mut self.blocks[index];
         let mut styles = block.character_styles();
@@ -235,7 +235,7 @@ impl FlowriteApp {
         if close && !self.show_home {
             let id = self.active_document.clone();
             if id.is_empty() {
-                self.go_home();
+                self.close_temporary_draft();
             } else {
                 self.close_tab(&id);
             }
@@ -366,344 +366,26 @@ impl FlowriteApp {
         }
     }
 
-    fn header(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("app_header")
-            .exact_height(58.0)
-            .frame(
-                Frame::none()
-                    .fill(theme::current().canvas)
-                    .inner_margin(Margin::symmetric(22.0, 10.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    self.brand_button(ui);
-                    ui.add_space(10.0);
-                    icons::menu(ui, Icon::Document, "", |ui| {
-                        if icons::labelled(ui, Icon::Document, "New document    Ctrl+N").clicked() {
-                            self.request_action(PendingAction::New, ctx);
-                            ui.close_menu();
-                        }
-                        if icons::labelled(ui, Icon::Open, "Open…    Ctrl+O").clicked() {
-                            self.request_action(PendingAction::Open, ctx);
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if icons::labelled(ui, Icon::Save, "Save    Ctrl+S").clicked() {
-                            self.save_document(false);
-                            ui.close_menu();
-                        }
-                        if icons::labelled(ui, Icon::Save, "Save as…    Ctrl+Shift+S").clicked() {
-                            self.save_document(true);
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if icons::labelled(ui, Icon::Settings, "Settings    Ctrl+,").clicked() {
-                            self.settings_open = true;
-                            ui.close_menu();
-                        }
-                    })
-                    .response
-                    .hand();
-                    if icons::control(
-                        ui,
-                        Icon::Undo,
-                        "Undo",
-                        "Undo · Ctrl+Z",
-                        !self.undo_stack.is_empty(),
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.undo();
-                    }
-                    if icons::control(
-                        ui,
-                        Icon::Redo,
-                        "Redo",
-                        "Redo · Ctrl+Shift+Z",
-                        !self.redo_stack.is_empty(),
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.redo();
-                    }
-                    ui.add_space(12.0);
-                    if self.settings.saving.indicator {
-                        ui.label(
-                            RichText::new(if self.dirty {
-                                "Saving…"
-                            } else if self.current_path.is_some()
-                                || !self.active_document.is_empty()
-                            {
-                                "All changes saved"
-                            } else {
-                                "New document"
-                            })
-                            .size(12.0)
-                            .color(theme::current().muted),
-                        );
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        icons::menu(ui, Icon::Export, "", |ui| {
-                            if ui.button("PDF document (.pdf)").hand().clicked() {
-                                ui.close_menu();
-                                self.export(ExportTarget::Pdf);
-                            }
-                            if ui.button("Markdown (.md)").hand().clicked() {
-                                ui.close_menu();
-                                self.export(ExportTarget::Markdown);
-                            }
-                        })
-                        .response
-                        .hand();
-                        if icons::control(ui, Icon::Save, "Save", "Save editable document · Ctrl+S", true, false)
-                            .clicked()
-                        {
-                            self.save_document(false);
-                        }
-                        if icons::control(
-                            ui,
-                            Icon::Search,
-                            "Find",
-                            "Find in document · Ctrl+F",
-                            true,
-                            self.find_open,
-                        )
-                        .clicked()
-                        {
-                            self.find_open = !self.find_open;
-                            if self.find_open {
-                                ctx.memory_mut(|m| m.request_focus(egui::Id::new("find_query")));
-                            }
-                        }
-                    });
-                });
-            });
-    }
-
-    fn toolbar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("format_toolbar")
-            .exact_height(48.0)
-            .frame(
-                Frame::none()
-                    .fill(theme::current().panel)
-                    .inner_margin(Margin::symmetric(18.0, 7.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    if icons::control(
-                        ui,
-                        Icon::Sidebar,
-                        "Sidebar",
-                        "Show or hide your documents",
-                        true,
-                        self.show_sidebar,
-                    )
-                    .clicked()
-                    {
-                        self.show_sidebar = !self.show_sidebar;
-                    }
-                    ui.separator();
-                    let index = self.active_index();
-                    self.image_button(ui);
-                    self.colors_menu(ui);
-                    let mut kind = self.blocks[index].kind;
-                    egui::ComboBox::from_id_salt("block_type")
-                        .selected_text(if kind == BlockKind::Text {
-                            "Paragraph"
-                        } else {
-                            kind.label()
-                        })
-                        .width(126.0)
-                        .show_ui(ui, |ui| {
-                            for candidate in BlockKind::ALL {
-                                ui.selectable_value(
-                                    &mut kind,
-                                    candidate,
-                                    if candidate == BlockKind::Text {
-                                        "Paragraph"
-                                    } else {
-                                        candidate.label()
-                                    },
-                                )
-                                .hand();
-                            }
-                        })
-                        .response
-                        .hand();
-                    if kind != self.blocks[index].kind {
-                        self.apply_command(index, kind);
-                    }
-                    let old_font = self.style.font.clone();
-                    egui::ComboBox::from_id_salt("font")
-                        .selected_text(&self.style.font)
-                        .width(112.0)
-                        .show_ui(ui, |ui| {
-                            for font in fonts::FAMILIES {
-                                ui.selectable_value(&mut self.style.font, font.to_owned(), font)
-                                    .hand();
-                            }
-                        })
-                        .response
-                        .hand();
-                    if old_font != self.style.font {
-                        self.dirty = true;
-                        self.force_history = true;
-                    }
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut self.style.font_size)
-                                .range(8.0..=36.0)
-                                .speed(0.5)
-                                .suffix(" pt"),
-                        )
-                        .on_hover_text("Document font size")
-                        .changed()
-                    {
-                        self.dirty = true;
-                    }
-                    ui.separator();
-                    let block = &self.blocks[index];
-                    let character = self
-                        .selection
-                        .filter(|(id, _, _)| *id == block.id)
-                        .map(|(_, start, _)| start)
-                        .unwrap_or(0);
-                    let style = block
-                        .character_styles()
-                        .get(character)
-                        .copied()
-                        .unwrap_or(block.format);
-                    for (label, decoration, active, hint) in [
-                        ("B", Decoration::Bold, style.bold, "Bold · Ctrl+B"),
-                        ("I", Decoration::Italic, style.italic, "Italic · Ctrl+I"),
-                        (
-                            "U",
-                            Decoration::Underline,
-                            style.underline,
-                            "Underline · Ctrl+U",
-                        ),
-                    ] {
-                        let icon = match decoration {
-                            Decoration::Bold => Icon::Bold,
-                            Decoration::Italic => Icon::Italic,
-                            Decoration::Underline => Icon::Underline,
-                        };
-                        if icons::control(
-                            ui,
-                            icon,
-                            hint.split(" · ").next().unwrap_or(label),
-                            hint,
-                            true,
-                            active,
-                        )
-                        .clicked()
-                        {
-                            self.toggle_decoration(decoration, ctx);
-                        }
-                    }
-                    ui.separator();
-                    icons::menu(ui, Icon::Spacing, "", |ui| {
-                        for (label, spacing) in [
-                            ("Single", 1.0),
-                            ("1.15", 1.15),
-                            ("1.5", 1.5),
-                            ("Double", 2.0),
-                        ] {
-                            if ui
-                                .selectable_label(
-                                    (self.style.line_spacing - spacing).abs() < 0.01,
-                                    label,
-                                )
-                                .hand()
-                                .clicked()
-                            {
-                                self.style.line_spacing = spacing;
-                                self.dirty = true;
-                                self.force_history = true;
-                                ui.close_menu();
-                            }
-                        }
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icons::control(
-                            ui,
-                            Icon::PageSetup,
-                            "Page setup",
-                            "Page setup and academic heading",
-                            true,
-                            self.show_inspector,
-                        )
-                        .clicked()
-                        {
-                            self.show_inspector = !self.show_inspector;
-                            self.show_citations = false;
-                        }
-                        if icons::control(
-                            ui,
-                            Icon::Citations,
-                            "Citations",
-                            "Works cited and references",
-                            true,
-                            self.show_citations,
-                        )
-                        .clicked()
-                        {
-                            self.show_citations = !self.show_citations;
-                            self.show_inspector = false;
-                        }
-                        ui.menu_button(self.style.paper_format.label(), |ui| {
-                            for format in
-                                [PaperFormat::Freeform, PaperFormat::Apa, PaperFormat::Mla]
-                            {
-                                if ui
-                                    .selectable_label(
-                                        self.style.paper_format == format,
-                                        format.label(),
-                                    )
-                                    .hand()
-                                    .clicked()
-                                {
-                                    self.style.apply_preset(format);
-                                    self.dirty = true;
-                                    self.force_history = true;
-                                    self.show_inspector = format != PaperFormat::Freeform;
-                                    self.show_citations = false;
-                                    ui.close_menu();
-                                }
-                            }
-                        });
-                    });
-                });
-            });
-    }
-
     fn inspector(&mut self, ctx: &egui::Context) {
         if !self.show_inspector {
             return;
         }
-        egui::SidePanel::right("page_setup")
-            .exact_width(264.0)
-            .resizable(false)
-            .frame(
-                Frame::none()
-                    .fill(theme::current().panel)
-                    .inner_margin(Margin::same(20.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Page setup").size(15.0).strong());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if icons::control(ui, Icon::Close, "Close", "Close panel", true, false)
-                            .clicked()
-                        {
-                            self.show_inspector = false;
-                        }
-                    });
+        design::detail_panel(ctx, "page_setup", self.detail_overlay, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Page setup").size(15.0).strong());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if icons::control(ui, Icon::Close, "Close", "Close panel", true, false)
+                        .clicked()
+                    {
+                        self.show_inspector = false;
+                    }
                 });
-                ui.add_space(20.0);
-                egui::ScrollArea::vertical().show(ui, |ui| {
+            });
+            ui.add_space(20.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.label("This is a writing view, not paginated paper. Presets set layout defaults; check your assignment requirements.");
+                    if icons::labelled(ui, Icon::Preview, "Open paper preview").clicked() { self.paper_preview(); }
+                    ui.add_space(12.0);
                     ui.label(
                         RichText::new("Document format")
                             .size(12.0)
@@ -744,15 +426,14 @@ impl FlowriteApp {
                                 .size(12.0)
                                 .color(theme::current().muted),
                         );
-                        if ui
-                            .add(
+                        let response = ui.add(
                                 egui::DragValue::new(value)
                                     .range(range)
                                     .speed(0.05)
                                     .suffix(suffix),
-                            )
-                            .changed()
-                        {
+                            );
+                        response.widget_info(|| { let mut info = egui::WidgetInfo::drag_value(true, *value as f64); info.label = Some(label.into()); info });
+                        if response.changed() {
                             self.dirty = true;
                         }
                         ui.add_space(12.0);
@@ -774,13 +455,12 @@ impl FlowriteApp {
                                     .size(12.0)
                                     .color(theme::current().muted),
                             );
-                            if ui
-                                .add(
+                            if design::named(ui.add(
                                     TextEdit::singleline(value)
                                         .hint_text(label)
-                                        .desired_width(220.0)
+                                        .desired_width(f32::INFINITY)
                                         .margin(Margin::same(7.0)),
-                                )
+                                ), egui::WidgetType::TextEdit, label)
                                 .changed()
                             {
                                 self.dirty = true;
@@ -789,7 +469,7 @@ impl FlowriteApp {
                         }
                     }
                 });
-            });
+        });
     }
 
     fn status_bar(&self, ctx: &egui::Context) {
@@ -841,13 +521,13 @@ impl FlowriteApp {
                     }
                     ui.label(
                         RichText::new(stats.join(" · "))
-                            .size(11.0)
+                            .size(12.0)
                             .color(theme::current().muted),
                     );
                     ui.add_space(10.0);
                     ui.label(
                         RichText::new(self.style.paper_format.label())
-                            .size(11.0)
+                            .size(12.0)
                             .color(theme::current().muted),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -862,10 +542,12 @@ impl FlowriteApp {
                             return;
                         }
                         ui.label(
-                            RichText::new(
-                                "/ insert  ·  Enter paragraph  ·  Shift+Enter line break",
-                            )
-                            .size(11.0)
+                            RichText::new(if self.dirty {
+                                "Saving…"
+                            } else {
+                                "Saved locally"
+                            })
+                            .size(12.0)
                             .color(theme::current().muted),
                         );
                     });
@@ -888,9 +570,9 @@ impl FlowriteApp {
                     .id_salt(("document_scroll", &self.active_document))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let width = (ui.available_width() - 64.0).clamp(260.0, 780.0);
-                        let leading = ((ui.available_width() - width) * 0.5).max(16.0);
-                        ui.add_space(54.0);
+                        let width = (ui.available_width() - 32.0).max(180.0).min(780.0);
+                        let leading = ((ui.available_width() - width) * 0.5).max(8.0);
+                        ui.add_space(28.0);
                         ui.horizontal(|ui| {
                             ui.add_space(leading);
                             ui.allocate_ui_with_layout(
@@ -927,7 +609,7 @@ impl FlowriteApp {
             }
         }
         let title = ui.add(
-            TextEdit::singleline(&mut self.title)
+            TextEdit::multiline(&mut self.title)
                 .id(egui::Id::new(("document_title", &self.active_document)))
                 .font(if academic {
                     document_font(&self.style, InlineStyle::default(), 16.0)
@@ -936,13 +618,16 @@ impl FlowriteApp {
                 })
                 .horizontal_align(if academic { Align::Center } else { Align::LEFT })
                 .frame(false)
+                .desired_rows(1)
+                .return_key(None)
                 .desired_width(width)
-                .margin(Margin::symmetric(30.0, 7.0))
+                .margin(Margin::symmetric(8.0, 7.0))
                 .hint_text("Untitled"),
         );
         if title.changed() {
             self.dirty = true;
         }
+        design::named(title, egui::WidgetType::TextEdit, "Document title");
         ui.add_space(if academic { 20.0 } else { 28.0 });
         let mut action = None;
         let mut counters = [0usize; 7];
@@ -976,11 +661,17 @@ impl FlowriteApp {
                 } else {
                     ui.add_space(self.blocks[index].indent.min(6) as f32 * 24.0);
                     if kind == BlockKind::Todo {
-                        if ui
-                            .checkbox(&mut self.blocks[index].checked, "")
-                            .hand()
-                            .changed()
-                        {
+                        let task = self.blocks[index].text.clone();
+                        let response = ui.checkbox(&mut self.blocks[index].checked, "").hand();
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::Checkbox,
+                                true,
+                                self.blocks[index].checked,
+                                format!("Task: {task}"),
+                            )
+                        });
+                        if response.changed() {
                             self.dirty = true;
                         }
                     }
@@ -998,11 +689,25 @@ impl FlowriteApp {
                                 .color(theme::current().muted),
                         );
                     }
-                    if kind == BlockKind::Quote {
-                        ui.label(RichText::new("│").size(22.0).color(theme::current().muted));
-                    }
+                    let quote_x = (kind == BlockKind::Quote).then(|| {
+                        let x = ui.cursor().left() + 3.0;
+                        ui.add_space(16.0);
+                        x
+                    });
                     let body_width = ui.available_width().min(width - 30.0);
-                    self.container_editor(ui, ctx, index, body_width)
+                    let response = self.container_editor(ui, ctx, index, body_width);
+                    if let Some(x) = quote_x {
+                        // Measure after TextEdit has wrapped every line; a glyph
+                        // or fixed-height widget cannot follow multiline content.
+                        ui.painter().line_segment(
+                            [
+                                Pos2::new(x, response.rect.top()),
+                                Pos2::new(x, response.rect.bottom()),
+                            ],
+                            Stroke::new(2.0_f32, theme::current().muted),
+                        );
+                    }
+                    response
                 };
                 response.context_menu(|ui| {
                     if kind == BlockKind::Image {
@@ -1010,6 +715,11 @@ impl FlowriteApp {
                         ui.separator();
                     }
                     self.proofing_menu(ui, index);
+                    ui.label(
+                        RichText::new("Block actions")
+                            .size(12.0)
+                            .color(theme::current().muted),
+                    );
                     if icons::labelled(ui, Icon::Copy, "Duplicate").clicked() {
                         action = Some(BlockAction::Duplicate(index));
                         ui.close_menu();
@@ -1154,6 +864,7 @@ impl FlowriteApp {
         let marks = self.blocks[index].marks.clone();
         let base = self.blocks[index].format;
         let style = self.style.clone();
+        let completed = kind == BlockKind::Todo && self.blocks[index].checked;
         let matches = if self.find_open {
             search::ranges(
                 &old_text,
@@ -1172,13 +883,23 @@ impl FlowriteApp {
         };
         let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
             ui.fonts(|fonts| {
-                fonts.layout_job(text_layout::job(
-                    text, base, &marks, &style, kind, size, wrap_width, &matches,
-                ))
+                let mut job =
+                    text_layout::job(text, base, &marks, &style, kind, size, wrap_width, &matches);
+                if completed {
+                    for section in &mut job.sections {
+                        section.format.color = theme::current().muted;
+                        section.format.strikethrough = Stroke::new(0.8_f32, theme::current().muted);
+                    }
+                }
+                fonts.layout_job(job)
             })
         };
         let output = TextEdit::multiline(&mut self.blocks[index].text)
             .id(widget_id)
+            .lock_focus(matches!(
+                kind,
+                BlockKind::Code | BlockKind::Bulleted | BlockKind::Numbered | BlockKind::Todo
+            ))
             .frame(false)
             .desired_width(width)
             .desired_rows(1)
@@ -1209,6 +930,11 @@ impl FlowriteApp {
             )))
             .show(ui);
         ctx.data_mut(|data| data.insert_temp(widget_id.with("layout"), output.galley.clone()));
+        design::named(
+            output.response.clone(),
+            egui::WidgetType::TextEdit,
+            &format!("{} block text", self.blocks[index].kind.label()),
+        );
         self.paint_proofing(ui, index, &output);
         if output.response.gained_focus() {
             // egui installs TextEdit's arrow-key focus lock on the following pass.
@@ -1223,6 +949,9 @@ impl FlowriteApp {
             if let Some(range) = output.state.cursor.char_range() {
                 let [a, b] = range.sorted();
                 self.selection = Some((id, a.index, b.index));
+                if a.index != b.index {
+                    self.selection_popup = Some(output.response.rect.min + Vec2::new(0.0, -42.0));
+                }
             }
         }
         if output.response.changed() {
@@ -1492,57 +1221,43 @@ impl FlowriteApp {
                 self.execute_action(pending, ctx);
             }
         }
-        if let Some(message) = self.notice.clone() {
-            let now = ctx.input(|i| i.time);
-            if self.notice_previous.as_deref() != Some(&message) {
-                self.notice_start = Some(now);
-                self.notice_previous = Some(message.clone());
-            }
-            let export = message.starts_with("Exported ");
-            if export
-                && self
-                    .notice_start
-                    .is_some_and(|start| now - start >= self.settings.export.toast_seconds)
-            {
-                self.notice = None;
-                self.notice_previous = None;
-                self.exported_path = None;
-                return;
-            }
-            if export {
-                ctx.request_repaint_after(std::time::Duration::from_millis(200));
-            }
-            egui::Area::new(egui::Id::new("notice"))
-                .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-20.0, -42.0))
-                .show(ctx, |ui| {
-                    Frame::popup(ui.style())
-                        .inner_margin(Margin::symmetric(14.0, 10.0))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(message).size(12.0));
-                                if export && ui.button("Open folder").hand().clicked() {
-                                    if let Some(parent) =
-                                        self.exported_path.as_ref().and_then(|p| p.parent())
-                                    {
-                                        settings_ui::open_path(parent);
-                                    }
-                                }
-                                if icons::control(
-                                    ui,
-                                    Icon::Close,
-                                    "Close",
-                                    "Close panel",
-                                    true,
-                                    false,
-                                )
-                                .clicked()
-                                {
-                                    self.notice = None;
-                                }
-                            });
-                        });
-                });
+        self.notification(ctx);
+    }
+}
+
+impl FlowriteApp {
+    pub(super) fn workspace_view(&mut self, ctx: &egui::Context) {
+        if self.settings_open {
+            self.settings_page(ctx);
+            return;
         }
+        self.header(ctx);
+        // Navigation precedes document-only chrome, preserving its visual landmarks.
+        if !self.focus_mode {
+            self.library_sidebar(ctx);
+        }
+        if self.show_home {
+            self.home_page(ctx);
+            return;
+        }
+        if !self.focus_mode {
+            self.document_tabs(ctx);
+            if self.settings.editor.toolbar {
+                self.toolbar(ctx);
+            }
+        }
+        self.find_bar(ctx);
+        self.status_bar(ctx);
+        self.detail_overlay = ctx.available_rect().width() < design::WRITING_MIN + 286.0;
+        if self.show_citations && self.show_inspector {
+            self.show_inspector = false;
+        }
+        if !self.focus_mode {
+            self.citations_panel(ctx);
+            self.inspector(ctx);
+        }
+        self.canvas(ctx);
+        self.selection_toolbar(ctx);
     }
 }
 
@@ -1561,33 +1276,16 @@ impl eframe::App for FlowriteApp {
             self.reset_history_baseline();
         }
         self.handle_keys(ctx);
-        if self.settings_open {
-            self.settings_page(ctx);
-        } else if self.show_home {
-            self.home_header(ctx);
-            self.home_page(ctx);
-        } else {
-            self.header(ctx);
-            if !self.focus_mode {
-                self.document_tabs(ctx);
-                self.toolbar(ctx);
-            }
-            self.find_bar(ctx);
-            self.status_bar(ctx);
-            if !self.focus_mode {
-                self.library_sidebar(ctx);
-                self.citations_panel(ctx);
-                self.inspector(ctx);
-            }
-            self.canvas(ctx);
-        }
+        self.workspace_view(ctx);
         self.popups(ctx);
         self.folder_dialog_ui(ctx);
         self.library_dialogs(ctx);
         self.recovery_dialog(ctx);
         self.command_palette(ctx);
+        self.writing_help(ctx);
+        self.proofing_review(ctx);
         let now = ctx.input(|i| i.time);
-        self.record_edits(now);
+        self.record_ui_edits(ctx, now);
         self.update_proofing(ctx);
         if let Some(title) = self.link_request.take() {
             self.follow_document_link(title);
@@ -1641,34 +1339,37 @@ pub(super) fn configure_visuals(ctx: &egui::Context, theme: &theme::Theme) {
     visuals.window_fill = theme::current().panel;
     visuals.extreme_bg_color = theme::current().canvas;
     visuals.override_text_color = Some(theme::current().ink);
-    visuals.faint_bg_color = Color32::from_rgb(37, 39, 43);
-    visuals.selection.bg_fill = theme.accent.gamma_multiply(0.28);
+    visuals.faint_bg_color = theme.surface;
+    visuals.selection.bg_fill = theme.surface;
+    visuals.selection.stroke = Stroke::NONE;
     for widget in [
         &mut visuals.widgets.inactive,
         &mut visuals.widgets.hovered,
         &mut visuals.widgets.active,
         &mut visuals.widgets.open,
     ] {
-        widget.bg_fill = Color32::from_rgb(43, 45, 50);
-        widget.weak_bg_fill = Color32::from_rgb(37, 39, 43);
+        widget.bg_fill = theme.surface;
+        widget.weak_bg_fill = theme.surface;
         widget.bg_stroke = Stroke::new(1.0_f32, theme::current().stroke);
         widget.rounding = Rounding::same(5.0);
     }
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(56, 59, 65);
-    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(45, 47, 52);
+    visuals.widgets.hovered.bg_fill = theme.hover;
+    visuals.widgets.hovered.weak_bg_fill = theme.hover;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, theme.accent);
     visuals.window_rounding = Rounding::same(9.0);
     ctx.set_visuals(visuals);
     ctx.style_mut(|style| {
-        style.spacing.item_spacing = Vec2::new(6.0, 6.0);
-        style.spacing.button_padding = Vec2::new(10.0, 6.0);
-        style.spacing.interact_size.y = 28.0;
+        style.spacing.item_spacing = Vec2::new(8.0, 8.0);
+        style.spacing.button_padding = Vec2::new(12.0, 6.0);
+        style.spacing.interact_size.y = design::ROW_HEIGHT;
+        style.spacing.window_margin = Margin::same(design::SPACE[4]);
         style.interaction.tooltip_delay = 0.25;
         style
             .text_styles
             .insert(egui::TextStyle::Body, FontId::proportional(14.0));
         style
             .text_styles
-            .insert(egui::TextStyle::Button, FontId::proportional(13.0));
+            .insert(egui::TextStyle::Button, FontId::proportional(14.0));
     });
 }
 
@@ -1681,16 +1382,83 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quote_rule_spans_explicit_lines_and_wrapped_text() {
+        for text in [
+            "Test\nfdsn\nfndslkn".to_owned(),
+            "A long quotation that wraps naturally across the writing column. ".repeat(12),
+        ] {
+            for scale in [1.0, 1.5] {
+                let ctx = egui::Context::default();
+                configure_fonts(&ctx);
+                ctx.set_zoom_factor(scale);
+                let mut app = FlowriteApp::empty();
+                app.blocks = vec![Block::new(1, BlockKind::Quote, &text)];
+                let mut output = None;
+                for _ in 0..3 {
+                    output = Some(ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                Pos2::ZERO,
+                                Vec2::new(500.0, 820.0) / scale,
+                            )),
+                            ..Default::default()
+                        },
+                        |ctx| app.canvas(ctx),
+                    ));
+                }
+                let output = output.unwrap();
+                let painted = output
+                    .shapes
+                    .iter()
+                    .find(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == text))
+                    .expect("quote text rendered");
+                let text_bounds = painted.shape.visual_bounding_rect();
+                let line = output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::LineSegment { points, stroke }
+                            if stroke.width == 2.0
+                                && points[0].x == points[1].x
+                                && points[0].x < text_bounds.left() =>
+                        {
+                            Some(points)
+                        }
+                        _ => None,
+                    })
+                    .expect("quote has a measured vertical rule");
+                assert!(line[0].y <= text_bounds.top());
+                assert!(
+                    line[1].y >= text_bounds.bottom(),
+                    "rule stops above the quote's final line"
+                );
+                assert!(line[1].y - line[0].y > 40.0);
+            }
+        }
+    }
+
+    #[test]
     fn header_actions_do_not_paint_immediate_labels() {
         let mut app = FlowriteApp::empty();
         let ctx = egui::Context::default();
         configure_fonts(&ctx);
-        let output = ctx.run(egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 300.0))),
-            ..Default::default()
-        }, |ctx| app.header(ctx));
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    Vec2::new(1000.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| app.header(ctx),
+        );
         for forbidden in ["File", "Save", "Export", "Find", "Undo", "Redo"] {
-            assert!(!output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == forbidden)), "Visible action label: {forbidden}");
+            assert!(
+                !output.shapes.iter().any(
+                    |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == forbidden)
+                ),
+                "Visible action label: {forbidden}"
+            );
         }
     }
 
@@ -1736,6 +1504,93 @@ mod tests {
         let mut app = FlowriteApp::empty();
         app.show_home = false;
         (app, ctx)
+    }
+
+    fn input_frame(
+        app: &mut FlowriteApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) {
+        let _ = ctx.run(
+            egui::RawInput {
+                events,
+                modifiers,
+                ..Default::default()
+            },
+            |ctx| {
+                app.handle_keys(ctx);
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.block_editor(ui, ctx, 0, 300.0);
+                    let _ = ui.button("Next focusable control").hand();
+                });
+                app.record_edits(ctx.input(|i| i.time));
+            },
+        );
+    }
+
+    #[test]
+    fn indentation_retains_real_textedit_focus_and_next_character() {
+        for kind in [
+            BlockKind::Code,
+            BlockKind::Bulleted,
+            BlockKind::Numbered,
+            BlockKind::Todo,
+        ] {
+            for original in ["parent", "café Ω"] {
+                let (mut app, ctx) = test_editor();
+                app.active_document = "test".into();
+                app.blocks[0].kind = kind;
+                app.blocks[0].text = original.into();
+                app.focus_request = Some((1, original.chars().count()));
+                input_frame(&mut app, &ctx, vec![], egui::Modifiers::NONE);
+                app.reset_history_baseline();
+                let key = |modifiers| egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                };
+                input_frame(
+                    &mut app,
+                    &ctx,
+                    vec![key(egui::Modifiers::NONE)],
+                    egui::Modifiers::NONE,
+                );
+                let widget = egui::Id::new(("block", &app.active_document, 1u64));
+                assert!(
+                    ctx.memory(|m| m.has_focus(widget)),
+                    "Tab lost {kind:?} focus"
+                );
+                input_frame(
+                    &mut app,
+                    &ctx,
+                    vec![egui::Event::Text("x".into())],
+                    egui::Modifiers::NONE,
+                );
+                assert!(
+                    app.blocks[0].text.ends_with('x'),
+                    "next character lost for {kind:?}"
+                );
+                if kind != BlockKind::Code {
+                    assert_eq!(app.blocks[0].indent, 1);
+                }
+                input_frame(
+                    &mut app,
+                    &ctx,
+                    vec![key(egui::Modifiers::SHIFT)],
+                    egui::Modifiers::NONE,
+                );
+                assert!(ctx.memory(|m| m.has_focus(widget)), "Shift+Tab lost focus");
+                if kind != BlockKind::Code {
+                    assert_eq!(app.blocks[0].indent, 0);
+                }
+                app.undo();
+                input_frame(&mut app, &ctx, vec![], egui::Modifiers::NONE);
+                assert!(ctx.memory(|m| m.has_focus(widget)), "Undo lost focus");
+            }
+        }
     }
 
     #[test]

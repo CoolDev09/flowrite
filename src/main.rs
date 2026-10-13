@@ -39,16 +39,26 @@ mod command_palette;
 mod containers;
 mod context_menu;
 mod date;
+mod design;
 mod fonts;
 mod history;
 mod icons;
 mod images;
 use icons::Icon;
+mod formatting_ui;
+mod notifications;
+mod preview;
+mod proofing_ui;
 mod recovery;
+#[cfg(test)]
+mod review_tests;
 mod search;
 mod settings;
 mod settings_ui;
+mod shell;
+mod sidebar;
 mod spellcheck;
+mod tabs;
 mod text_layout;
 mod theme;
 mod widgets;
@@ -56,6 +66,7 @@ use widgets::HandCursor;
 mod navigation;
 use history::UndoSnapshot;
 mod home_ui;
+mod library_home;
 mod wikilinks;
 mod workspace_ui;
 
@@ -136,6 +147,9 @@ pub struct FlowriteApp {
     focus_mode: bool,
     image_cache: std::collections::HashMap<String, egui::TextureHandle>,
     recovery: recovery::Recovery,
+    detail_overlay: bool,
+    selection_popup: Option<Pos2>,
+    proofing_open: bool,
 }
 
 impl FlowriteApp {
@@ -218,6 +232,9 @@ impl FlowriteApp {
             focus_mode: false,
             image_cache: std::collections::HashMap::new(),
             recovery: recovery::Recovery::default(),
+            detail_overlay: false,
+            selection_popup: None,
+            proofing_open: false,
         }
     }
 

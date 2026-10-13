@@ -33,17 +33,17 @@ pub(super) fn logo(ui: &egui::Ui, rect: egui::Rect) {
 
 impl FlowriteApp {
     pub(super) fn brand_button(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(Vec2::new(134.0, 36.0), Sense::click());
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(102.0, 32.0), Sense::click());
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "flowrite · Home")
         });
-        let icon = egui::Rect::from_min_size(rect.min + Vec2::new(0.0, 3.0), Vec2::splat(30.0));
+        let icon = egui::Rect::from_min_size(rect.min + Vec2::new(0.0, 3.0), Vec2::splat(26.0));
         logo(ui, icon);
         ui.painter().text(
-            rect.min + Vec2::new(42.0, 18.0),
+            rect.min + Vec2::new(36.0, 16.0),
             egui::Align2::LEFT_CENTER,
             "flowrite",
-            FontId::proportional(21.0),
+            FontId::proportional(16.0),
             theme::current().ink,
         );
         if response

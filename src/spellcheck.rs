@@ -314,8 +314,16 @@ impl FlowriteApp {
                 })
             });
         if let Some(issue) = issue {
+            ui.label(
+                RichText::new(if issue.spelling {
+                    "Spelling · English (US)"
+                } else {
+                    "Grammar · suggestion"
+                })
+                .strong(),
+            );
             if !self.settings.proofing.highlight_only {
-                ui.label(RichText::new(&issue.message).small());
+                ui.label(RichText::new(&issue.message).size(14.0));
                 for replacement in &issue.replacements {
                     if ui.button(replacement).hand().clicked() {
                         self.insert_at(index, issue.start, issue.end, replacement);

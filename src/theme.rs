@@ -9,17 +9,21 @@ pub(super) struct Theme {
     pub canvas: Color32,
     pub stroke: Color32,
     pub accent: Color32,
+    pub surface: Color32,
+    pub hover: Color32,
     pub callouts: [([u8; 3], [u8; 3]); 5],
 }
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            ink: Color32::from_rgb(230, 231, 235),
-            muted: Color32::from_rgb(151, 155, 165),
-            panel: Color32::from_rgb(29, 30, 34),
-            canvas: Color32::from_rgb(24, 25, 28),
-            stroke: Color32::from_rgb(53, 55, 62),
+            ink: Color32::from_gray(227),
+            muted: Color32::from_gray(160),
+            panel: Color32::from_gray(32),
+            canvas: Color32::from_gray(25),
+            stroke: Color32::from_gray(55),
             accent: Color32::from_rgb(205, 211, 215),
+            surface: Color32::from_gray(37),
+            hover: Color32::from_gray(43),
             callouts: [
                 ([91, 155, 213], [27, 39, 51]),
                 ([92, 184, 92], [27, 42, 31]),
@@ -47,7 +51,7 @@ impl Theme {
         let color = ACCENTS[settings.accent.min(8)].1;
         theme.accent = Color32::from_rgb(color[0], color[1], color[2]);
         if settings.dim_page {
-            theme.canvas = Color32::from_rgb(31, 32, 35);
+            theme.canvas = Color32::from_gray(29);
         }
         if settings.high_contrast {
             theme.ink = Color32::WHITE;

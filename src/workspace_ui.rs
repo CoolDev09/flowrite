@@ -155,275 +155,60 @@ impl FlowriteApp {
         let _ = self.workspace.save();
     }
 
-    pub(super) fn document_tabs(&mut self, ctx: &egui::Context) {
-        let mut open = None;
-        let mut close = None;
-        egui::TopBottomPanel::top("document_tabs")
-            .exact_height(38.0)
-            .frame(
-                Frame::none()
-                    .fill(theme::current().canvas)
-                    .inner_margin(Margin::symmetric(16.0, 5.0)),
-            )
-            .show(ctx, |ui| {
-                egui::ScrollArea::horizontal().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for id in &self.workspace.tabs {
-                            if let Some(doc) = self.workspace.documents.iter().find(|d| &d.id == id)
-                            {
-                                let title = if id == &self.active_document {
-                                    &self.title
-                                } else {
-                                    &doc.document.title
-                                };
-                                let label: String = title.chars().take(28).collect();
-                                ui.push_id(id, |ui| {
-                                    let response = ui
-                                        .selectable_label(id == &self.active_document, label)
-                                        .on_hover_text(title)
-                                        .hand();
-                                    if response.clicked() {
-                                        open = Some(id.clone());
-                                    }
-                                    if response.clicked_by(egui::PointerButton::Middle) {
-                                        close = Some(id.clone());
-                                    }
-                                    response.context_menu(|ui| {
-                                        if let Some(action) =
-                                            context_menu::page_menu(ui, id, &self.workspace)
-                                        {
-                                            self.dialogs.action = Some(action);
-                                        }
-                                    });
-                                    if icons::control(
-                                        ui,
-                                        Icon::Close,
-                                        "Close tab",
-                                        "Close tab · Ctrl+W · page stays in your library",
-                                        true,
-                                        false,
-                                    )
-                                    .clicked()
-                                    {
-                                        close = Some(id.clone());
-                                    }
-                                });
-                                ui.separator();
-                            }
-                        }
-                        if icons::control(
-                            ui,
-                            Icon::Plus,
-                            "New document",
-                            "New document · Ctrl+N",
-                            true,
-                            false,
-                        )
-                        .clicked()
-                        {
-                            open = Some(String::new());
-                        }
-                    });
-                });
-            });
-        if let Some(id) = close {
-            self.close_tab(&id);
-        }
-        if let Some(id) = open {
-            if id.is_empty() {
-                self.start_fresh();
-            } else {
-                self.switch_document(&id);
-            }
-        }
-    }
-
-    pub(super) fn library_sidebar(&mut self, ctx: &egui::Context) {
-        if !self.show_sidebar {
-            return;
-        }
-        let mut open = None;
-        egui::SidePanel::left("library")
-            .default_width(self.settings.appearance.sidebar_width)
-            .width_range(180.0..=360.0)
-            .frame(
-                Frame::none()
-                    .fill(theme::current().panel)
-                    .inner_margin(Margin::same(14.0)),
-            )
-            .show(ctx, |ui| {
-                ui.add_space(12.0);
-                ui.label(RichText::new("Your workspace").size(14.0).strong());
-                ui.add_space(16.0);
-                ui.add(
-                    TextEdit::singleline(&mut self.sidebar_query)
-                        .hint_text("Search documents…")
-                        .desired_width(f32::INFINITY),
-                );
-                ui.add_space(10.0);
-                if ui
-                    .add_sized(
-                        [ui.available_width(), 30.0],
-                        egui::Button::new("+  New document").frame(false),
-                    )
-                    .hand()
-                    .clicked()
-                {
-                    open = Some(String::new());
-                }
-                ui.add_space(18.0);
-                ui.label(
-                    RichText::new("DOCUMENTS")
-                        .size(10.0)
-                        .color(theme::current().muted),
-                );
-                ui.add_space(8.0);
-                let query = self.sidebar_query.to_lowercase();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let groups: Vec<_> = if self.settings.appearance.folders {
-                        self.workspace
-                            .folders
-                            .iter()
-                            .map(|f| Some((f.id.clone(), f.name.clone())))
-                            .chain(std::iter::once(None))
-                            .collect()
-                    } else {
-                        vec![None]
-                    };
-                    for group in groups {
-                        let mut pages = |ui: &mut egui::Ui| {
-                            for entry in &self.workspace.documents {
-                                if self.settings.appearance.folders
-                                    && entry.folder.as_deref()
-                                        != group.as_ref().map(|(id, _)| id.as_str())
-                                {
-                                    continue;
-                                }
-                                let title = if entry.id == self.active_document {
-                                    &self.title
-                                } else {
-                                    &entry.document.title
-                                };
-                                if !title.to_lowercase().contains(&query) {
-                                    continue;
-                                }
-                                let response = ui
-                                    .add_sized(
-                                        [ui.available_width(), 30.0],
-                                        egui::Button::new(RichText::new(title).size(13.0))
-                                            .selected(entry.id == self.active_document)
-                                            .frame(false),
-                                    )
-                                    .hand();
-                                if response.clicked() {
-                                    open = Some(entry.id.clone());
-                                }
-                                response.context_menu(|ui| {
-                                    if let Some(action) =
-                                        context_menu::page_menu(ui, &entry.id, &self.workspace)
-                                    {
-                                        self.dialogs.action = Some(action);
-                                    }
-                                });
-                            }
-                        };
-                        if let Some((id, name)) = &group {
-                            let header = egui::CollapsingHeader::new(name)
-                                .id_salt(id)
-                                .default_open(true)
-                                .show(ui, &mut pages);
-                            header.header_response.hand().context_menu(|ui| {
-                                if let Some(action) = context_menu::folder_menu(ui, id) {
-                                    self.dialogs.action = Some(action);
-                                }
-                            });
-                        } else {
-                            pages(ui);
-                        }
-                    }
-                    ui.add_space(28.0);
-                    ui.label(
-                        RichText::new("ON THIS PAGE")
-                            .size(10.0)
-                            .color(theme::current().muted),
-                    );
-                    for block in &self.blocks {
-                        let label = if block.kind == BlockKind::Heading2 {
-                            format!("    {}", block.text)
-                        } else {
-                            block.text.clone()
-                        };
-                        if matches!(block.kind, BlockKind::Heading1 | BlockKind::Heading2)
-                            && ui
-                                .selectable_label(self.focused_block == Some(block.id), label)
-                                .hand()
-                                .clicked()
-                        {
-                            self.scroll_target = Some(block.id);
-                        }
-                    }
-                    ui.add_space(20.0);
-                    if ui
-                        .selectable_label(
-                            self.show_citations,
-                            format!(
-                                "Works cited  ·  {}",
-                                sorted_citations(&self.citations).len()
-                            ),
-                        )
-                        .hand()
-                        .clicked()
-                    {
-                        self.show_citations = !self.show_citations;
-                        self.show_inspector = false;
-                    }
-                    ui.add_space(16.0);
-                    ui.label(
-                        RichText::new("Link pages with [[Document title]]")
-                            .size(11.0)
-                            .color(theme::current().muted),
-                    );
-                });
-            });
-        if let Some(id) = open {
-            if id.is_empty() {
-                self.start_fresh();
-            } else {
-                self.switch_document(&id);
-            }
-        }
-    }
-
     pub(super) fn citations_panel(&mut self, ctx: &egui::Context) {
         if !self.show_citations {
             return;
         }
         let mut remove = None;
-        egui::SidePanel::right("citations").default_width(292.0).width_range(250.0..=420.0)
-            .frame(Frame::none().fill(theme::current().panel).inner_margin(Margin::same(18.0)))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading(self.citations_heading());
-                    if icons::control(ui, Icon::Close, "Close", "Close citations", true, false).clicked() { self.show_citations=false; }
-                });
-                ui.add_space(12.0);
-                ui.label(RichText::new("Paste one finished citation per entry. Entries are alphabetized and given hanging indents. PDF starts them on a new page.").size(12.0).color(theme::current().muted));
-                ui.add_space(14.0);
-                if icons::labelled(ui, Icon::Plus, "Add citation").clicked() { self.citations.push(String::new()); self.dirty=true; }
-                ui.add_space(12.0);
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index,citation) in self.citations.iter_mut().enumerate() {
-                        ui.push_id(index, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("Citation {}",index+1)).size(11.0).color(theme::current().muted));
-                                if icons::danger(ui, "Delete").clicked() { remove=Some(index); }
-                            });
-                            if ui.add(TextEdit::multiline(citation).hint_text("Author. Title. Publisher, year.").desired_rows(5).desired_width(f32::INFINITY)).changed() { self.dirty=true; }
-                            ui.add_space(18.0);
-                        });
-                    }
-                });
+        design::detail_panel(ctx, "citations", self.detail_overlay, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(self.citations_heading());
+                if icons::control(ui, Icon::Close, "Close", "Close citations", true, false)
+                    .clicked()
+                {
+                    self.show_citations = false;
+                }
             });
+            ui.add_space(12.0);
+            ui.label(RichText::new("Paste one finished citation per entry. Entries are alphabetized and given hanging indents. PDF starts them on a new page.").size(12.0).color(theme::current().muted));
+            ui.add_space(14.0);
+            if icons::labelled(ui, Icon::Plus, "Add citation").clicked() {
+                self.citations.push(String::new());
+                self.dirty = true;
+            }
+            ui.add_space(12.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (index, citation) in self.citations.iter_mut().enumerate() {
+                    ui.push_id(index, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("Citation {}", index + 1))
+                                    .size(11.0)
+                                    .color(theme::current().muted),
+                            );
+                            if icons::danger(ui, "Delete").clicked() {
+                                remove = Some(index);
+                            }
+                        });
+                        if design::named(
+                            ui.add(
+                                TextEdit::multiline(citation)
+                                    .hint_text("Author. Title. Publisher, year.")
+                                    .desired_rows(5)
+                                    .desired_width(f32::INFINITY),
+                            ),
+                            egui::WidgetType::TextEdit,
+                            &format!("Citation {}", index + 1),
+                        )
+                        .changed()
+                        {
+                            self.dirty = true;
+                        }
+                        ui.add_space(18.0);
+                    });
+                }
+            });
+        });
         if let Some(index) = remove {
             self.citations.remove(index);
             self.dirty = true;

@@ -28,6 +28,7 @@ icons! {
     Document => "document", Citations => "book", Check => "check", Code => "code-simple",
     Heading => "heading", Divider => "horizontal-rule", PageSetup => "layout-fluid",
     Color => "palette", Import => "file-import", Up => "arrow-up", Down => "arrow-down",
+    Home => "home", Preview => "file-pdf", Grid => "apps",
 }
 
 pub(super) const DANGER: Color32 = Color32::from_rgb(235, 112, 112);
@@ -60,8 +61,11 @@ impl Icon {
         texture
     }
     pub fn image(self, ui: &egui::Ui, color: Color32) -> egui::Image<'static> {
-        let texture = self.texture(ui.ctx(), 17.0);
-        egui::Image::new((texture.id(), Vec2::splat(17.0))).tint(color)
+        self.image_sized(ui, color, 17.0)
+    }
+    fn image_sized(self, ui: &egui::Ui, color: Color32, points: f32) -> egui::Image<'static> {
+        let texture = self.texture(ui.ctx(), points);
+        egui::Image::new((texture.id(), Vec2::splat(points))).tint(color)
     }
 }
 
@@ -74,14 +78,38 @@ pub(super) fn control(
     enabled: bool,
     selected: bool,
 ) -> egui::Response {
+    control_sized(ui, icon, label, hint, enabled, selected, 17.0)
+}
+
+pub(super) const TAB_ICON_SIZE: f32 = 12.0;
+
+/// Quieter tab artwork, without shrinking the accessible click target.
+pub(super) fn tab_control(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    hint: &str,
+) -> egui::Response {
+    control_sized(ui, icon, label, hint, true, false, TAB_ICON_SIZE)
+}
+
+fn control_sized(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    hint: &str,
+    enabled: bool,
+    selected: bool,
+    points: f32,
+) -> egui::Response {
     let enabled = enabled && ui.is_enabled();
     let color = if enabled {
         ui.visuals().text_color()
     } else {
         theme::current().muted.gamma_multiply(0.5)
     };
-    let button = egui::Button::image(icon.image(ui, color))
-        .min_size(Vec2::splat(28.0))
+    let button = egui::Button::image(icon.image_sized(ui, color, points))
+        .min_size(Vec2::splat(design::ROW_HEIGHT))
         .rounding(5.0)
         .selected(selected);
     let response = ui
@@ -97,6 +125,7 @@ pub(super) fn control(
         .hand()
         .on_hover_text(hint);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    design::focus_ring(ui, &response);
     response
 }
 pub(super) fn labelled(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
@@ -111,7 +140,7 @@ pub(super) fn labelled_enabled(
     let (label, shortcut) = label.split_once("    ").unwrap_or((label, ""));
     let button = egui::Button::image_and_text(icon.image(ui, ui.visuals().text_color()), label)
         .shortcut_text(shortcut)
-        .min_size(Vec2::new(0.0, 28.0))
+        .min_size(Vec2::new(0.0, design::ROW_HEIGHT))
         .rounding(5.0);
     ui.add_enabled(enabled, button).hand()
 }
@@ -129,7 +158,24 @@ pub(super) fn menu<R>(
     label: &str,
     content: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    let image = icon.image(ui, ui.visuals().text_color());
+    menu_sized(ui, icon, label, content, 17.0)
+}
+
+pub(super) fn tab_menu<R>(
+    ui: &mut egui::Ui,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    menu_sized(ui, Icon::More, "", content, TAB_ICON_SIZE)
+}
+
+fn menu_sized<R>(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+    points: f32,
+) -> egui::InnerResponse<Option<R>> {
+    let image = icon.image_sized(ui, ui.visuals().text_color(), points);
     let nested = ui.stack().contained_in(egui::UiKind::Menu);
     let mut result = if nested && !label.is_empty() {
         // egui's submenu path ignores images. Reserve a leading icon slot,
@@ -140,10 +186,10 @@ pub(super) fn menu<R>(
                 result.response.rect.left() + 12.5,
                 result.response.rect.center().y,
             ),
-            Vec2::splat(17.0),
+            Vec2::splat(points),
         );
         ui.painter().image(
-            icon.texture(ui.ctx(), 17.0).id(),
+            icon.texture(ui.ctx(), points).id(),
             rect,
             egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             ui.visuals().text_color(),
@@ -159,7 +205,8 @@ pub(super) fn menu<R>(
             Icon::Image => "Insert image",
             Icon::Color => "Text color and highlight",
             Icon::Spacing => "Line spacing",
-            Icon::More => "Page actions",
+            Icon::More => "More actions",
+            Icon::Preview => "Paper preview",
             Icon::Document => "File menu · new, open, save and settings",
             Icon::Export => "Export document · PDF or Markdown",
             Icon::Info | Icon::Tip | Icon::Warning | Icon::Important => "Change callout type",
@@ -201,24 +248,102 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tab_icons_are_smaller_but_keep_full_click_targets() {
+        let ctx = egui::Context::default();
+        configure_visuals(&ctx, &theme::Theme::default());
+        let mut targets = Vec::new();
+        let mut output = None;
+        for _ in 0..3 {
+            targets.clear();
+            output = Some(ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        targets.push(tab_control(ui, Icon::Close, "Close tab", "Close tab").rect);
+                        targets.push(tab_menu(ui, |_| {}).response.rect);
+                        targets.push(tab_control(ui, Icon::Plus, "New page", "New page").rect);
+                    });
+                });
+            }));
+        }
+        fn image_bounds(shape: &egui::Shape, texture: egui::TextureId) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Rect(rect) if rect.fill_texture_id == texture => Some(rect.rect),
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.calc_bounds()),
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| image_bounds(s, texture)),
+                _ => None,
+            }
+        }
+        for target in targets {
+            assert!(target.height() >= 32.0);
+        }
+        for icon in [Icon::Close, Icon::More, Icon::Plus] {
+            let texture = icon.texture(&ctx, TAB_ICON_SIZE).id();
+            let bounds = output
+                .as_ref()
+                .unwrap()
+                .shapes
+                .iter()
+                .find_map(|s| image_bounds(&s.shape, texture))
+                .unwrap_or_else(|| panic!("{} tab icon painted", icon.name()));
+            assert!((bounds.width() - 12.0).abs() < 0.1);
+            assert!((bounds.height() - 12.0).abs() < 0.1);
+        }
+    }
+
+    #[test]
     fn action_names_are_hidden_until_hovered() {
         let ctx = egui::Context::default();
         let mut bounds = egui::Rect::NOTHING;
-        let output = ctx.run(egui::RawInput {time:Some(0.0),..Default::default()}, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                bounds = control(ui, Icon::Save, "Save", "Save document · Ctrl+S", true, false).rect;
-            });
-        });
-        assert!(!output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text.contains("Save"))));
+        let output = ctx.run(
+            egui::RawInput {
+                time: Some(0.0),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    bounds = control(
+                        ui,
+                        Icon::Save,
+                        "Save",
+                        "Save document · Ctrl+S",
+                        true,
+                        false,
+                    )
+                    .rect;
+                });
+            },
+        );
+        assert!(!output.shapes.iter().any(
+            |s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text.contains("Save"))
+        ));
         let point = bounds.center();
         let mut shown = false;
         for frame in 0..45 {
-            let output = ctx.run(egui::RawInput {time:Some(1.0+frame as f64*0.02),events:vec![egui::Event::PointerMoved(point)],..Default::default()}, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {control(ui, Icon::Save, "Save", "Save document · Ctrl+S", true, false);});
-            });
+            let output = ctx.run(
+                egui::RawInput {
+                    time: Some(1.0 + frame as f64 * 0.02),
+                    events: vec![egui::Event::PointerMoved(point)],
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        control(
+                            ui,
+                            Icon::Save,
+                            "Save",
+                            "Save document · Ctrl+S",
+                            true,
+                            false,
+                        );
+                    });
+                },
+            );
             shown |= output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text=="Save document · Ctrl+S"));
         }
-        assert!(shown, "The hover tooltip must expose the action name and shortcut");
+        assert!(
+            shown,
+            "The hover tooltip must expose the action name and shortcut"
+        );
     }
     #[test]
     fn every_icon_parses_and_has_provenance() {

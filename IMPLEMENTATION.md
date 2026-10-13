@@ -1,5 +1,7 @@
 # Requested changes: implementation status
 
+The supplied 0.2.4 review is a separate, newer implementation scope. All B01–B07 and I01–I16 changes are tracked in [REVIEW_CHANGES.md](REVIEW_CHANGES.md) for the local 0.3.0 build. The remaining items below belong to the earlier roadmap; they are not claims about omissions in the review update. No 0.3.0 GitHub release is requested.
+
 This file tracks the supplied Needed Fixes/Changes document. **Partial means the
 feature is usable but does not yet satisfy every bullet in that item.** The full
 roadmap is not complete. The 0.2.2 style pass uses the official Flaticon Uicons

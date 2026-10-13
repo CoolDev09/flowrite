@@ -30,6 +30,39 @@ mod tests {
 }
 
 impl FlowriteApp {
+    pub(super) fn record_ui_edits(&mut self, ctx: &egui::Context, now: f64) {
+        if !self.active_document.is_empty() {
+            self.record_edits(now);
+            return;
+        }
+        // Promoting a temporary draft must not change which editor owns the caret.
+        let title = egui::Id::new(("document_title", &self.active_document));
+        let focused = ctx.memory(|m| m.focused());
+        let block = self
+            .blocks
+            .iter()
+            .find(|b| focused == Some(egui::Id::new(("block", &self.active_document, b.id))))
+            .map(|b| b.id);
+        let state = focused.and_then(|id| TextEdit::load_state(ctx, id));
+        let draft = self.active_document.is_empty();
+        self.record_edits(now);
+        if draft && !self.active_document.is_empty() {
+            let target = if focused == Some(title) {
+                Some(egui::Id::new(("document_title", &self.active_document)))
+            } else {
+                block.map(|id| egui::Id::new(("block", &self.active_document, id)))
+            };
+            if let Some(target) = target {
+                if let Some(state) = state {
+                    state.store(ctx, target);
+                }
+                self.focus_request = None;
+                ctx.memory_mut(|m| m.request_focus(target));
+                ctx.request_discard("Retain temporary draft editing focus");
+            }
+        }
+    }
+
     pub(super) fn history_entry(&self) -> UndoSnapshot {
         UndoSnapshot {
             document: self.local_document(),

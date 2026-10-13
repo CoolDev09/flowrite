@@ -7,6 +7,7 @@ fn rasterize(
     ctx: &egui::Context,
     output: egui::FullOutput,
     textures: &mut HashMap<egui::TextureId, image::RgbaImage>,
+    pixels: Vec2,
 ) -> image::RgbaImage {
     for (id, delta) in output.textures_delta.set {
         let [width, height] = delta.image.size();
@@ -22,14 +23,24 @@ fn rasterize(
             textures.insert(id, update);
         }
     }
-    let mut canvas = image::RgbaImage::from_pixel(1280, 820, image::Rgba([24, 25, 28, 255]));
-    for primitive in ctx.tessellate(output.shapes, 1.0) {
-        let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
+    let mut canvas = image::RgbaImage::from_pixel(
+        pixels.x as u32,
+        pixels.y as u32,
+        image::Rgba([25, 25, 25, 255]),
+    );
+    let ppp = ctx.pixels_per_point();
+    for primitive in ctx.tessellate(output.shapes, ppp) {
+        let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive else {
             continue;
         };
         let Some(texture) = textures.get(&mesh.texture_id) else {
             continue;
         };
+        for vertex in &mut mesh.vertices {
+            vertex.pos = Pos2::new(vertex.pos.x * ppp, vertex.pos.y * ppp);
+        }
+        let clip =
+            egui::Rect::from_min_max(primitive.clip_rect.min * ppp, primitive.clip_rect.max * ppp);
         for triangle in mesh.indices.chunks_exact(3) {
             let [a, b, c] = [
                 mesh.vertices[triangle[0] as usize],
@@ -43,16 +54,16 @@ fn rasterize(
             }
             let bounds =
                 egui::Rect::from_min_max(a.pos.min(b.pos).min(c.pos), a.pos.max(b.pos).max(c.pos))
-                    .intersect(primitive.clip_rect)
+                    .intersect(clip)
                     .intersect(egui::Rect::from_min_max(
                         Pos2::ZERO,
-                        Pos2::new(1280.0, 820.0),
+                        Pos2::new(pixels.x, pixels.y),
                     ));
             if bounds.is_negative() {
                 continue;
             }
-            for y in bounds.min.y.max(0.0) as u32..bounds.max.y.ceil().min(820.0) as u32 {
-                for x in bounds.min.x.max(0.0) as u32..bounds.max.x.ceil().min(1280.0) as u32 {
+            for y in bounds.min.y.max(0.0) as u32..bounds.max.y.ceil().min(pixels.y) as u32 {
+                for x in bounds.min.x.max(0.0) as u32..bounds.max.x.ceil().min(pixels.x) as u32 {
                     let p = Pos2::new(x as f32 + 0.5, y as f32 + 0.5);
                     let wa = cross(b.pos - p, c.pos - p) / area;
                     let wb = cross(c.pos - p, a.pos - p) / area;
@@ -108,93 +119,162 @@ fn isolated_ui_panels_render_without_loading_user_data() {
         return;
     };
     std::fs::create_dir_all(&directory).unwrap();
-    let mut app = FlowriteApp::empty();
-    app.workspace.directory = directory.join("isolated-library");
-    app.title = "A quiet place to write".into();
-    app.blocks=vec![Block::new(1,BlockKind::Heading1,"Ideas deserve room to grow"),Block::new(2,BlockKind::Text,"Lorem ipsum dolor sit amet, consectetur adipiscing elit. A thoughtful workspace keeps the focus on your words, with useful tools just a click away."),Block::new(3,BlockKind::Callout,"A useful note stands apart from the rest of the page."),Block::new(4,BlockKind::Code,"fn main() {\n    println!(\"Hello, flowrite!\");\n}"),Block::new(5,BlockKind::Text,"")];
-    app.blocks[3].language = "rust".into();
-    let id = app.workspace.add(app.local_document(), None);
-    app.active_document = id.clone();
-    let folder = app.workspace.create_folder("Writing").unwrap();
-    app.workspace.move_document(&id, Some(folder));
-    let ctx = egui::Context::default();
-    configure_fonts(&ctx);
-    app.apply_settings(&ctx);
-    let mut textures = HashMap::new();
-    for mode in [
-        "home",
-        "editor",
-        "settings",
-        "page-actions",
-        "delete-confirmation",
-        "slash-menu",
-    ] {
-        app.show_home = mode == "home";
-        app.settings_open = mode == "settings";
-        app.dialogs.delete = if mode == "delete-confirmation" {
-            Some(context_menu::PageAction::Delete(id.clone()))
-        } else {
-            None
-        };
-        app.slash_target = if mode == "slash-menu" { Some(4) } else { None };
-        if mode == "slash-menu" {
-            app.blocks[4].text = "/".into();
-            app.command_position = Pos2::new(460.0, 360.0);
-            app.command_query = "/".into();
-        }
-        for pass in 0..12 {
-            let output = ctx.run(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        Pos2::ZERO,
-                        Vec2::new(1280.0, 820.0),
-                    )),
-                    ..Default::default()
-                },
-                |ctx| {
-                    if app.settings_open {
-                        app.settings_page(ctx);
-                    } else if app.show_home {
-                        app.home_header(ctx);
-                        app.home_page(ctx);
-                    } else {
-                        app.header(ctx);
-                        app.document_tabs(ctx);
-                        app.toolbar(ctx);
-                        app.status_bar(ctx);
-                        app.library_sidebar(ctx);
-                        app.canvas(ctx);
-                        if mode == "page-actions" {
-                            egui::Window::new("Page actions")
-                                .default_pos(Pos2::new(750.0, 210.0))
-                                .show(ctx, |ui| {
-                                    context_menu::page_menu(ui, &id, &app.workspace);
-                                });
-                        }
-                        if mode == "delete-confirmation" {
-                            app.library_dialogs(ctx);
-                        }
-                        if mode == "slash-menu" {
-                            app.popups(ctx);
+    for pixels in [Vec2::new(1280.0, 820.0), Vec2::new(900.0, 600.0)] {
+        for scale in [1.0, 1.25, 1.5] {
+            for mode in [
+                "home",
+                "gallery",
+                "folder",
+                "draft",
+                "mixed",
+                "settings",
+                "settings-search",
+                "page-actions",
+                "slash-menu",
+                "apa",
+                "follow-up",
+            ] {
+                let mut app = FlowriteApp::empty();
+                app.workspace.directory = directory.join("isolated-library");
+                app.title =
+                    "QA Mixed Blocks — import/export with a long readable page title".into();
+                app.blocks = vec![Block::new(1, BlockKind::Heading1, "Ideas deserve room to grow"), Block::new(2, BlockKind::Text, "A thoughtful workspace keeps the focus on your words, with useful tools just a click away. Café naïve — Ω."), Block::new(3, BlockKind::Callout, "A useful note stands apart from the rest of the page."), Block::new(4, BlockKind::Code, "fn main() {\n    println!(\"Hello, flowrite!\");\n}"), Block::new(5, BlockKind::Todo, "Completed task"), Block::new(6, BlockKind::Text, "")];
+                app.blocks[3].language = "rust".into();
+                app.blocks[4].checked = true;
+                if mode == "follow-up" {
+                    app.title = "Layout refinements".into();
+                    app.blocks = vec![
+                        Block::new(1, BlockKind::Quote, "Test\nfdsn\nfndslkn"),
+                        Block::new(
+                            2,
+                            BlockKind::Code,
+                            "print(\"café Ω\")\n    print(\"second line\")",
+                        ),
+                    ];
+                }
+                let id = app.workspace.add(app.local_document(), None);
+                app.active_document = id.clone();
+                let folder = app.workspace.create_folder("Writing").unwrap();
+                app.workspace.move_document(&id, Some(folder.clone()));
+                app.show_home = matches!(mode, "home" | "gallery" | "folder");
+                app.settings.appearance.list_view = mode != "gallery";
+                app.settings.appearance.scale = scale;
+                app.settings_open = mode.starts_with("settings");
+                app.settings_section = 1;
+                if mode == "settings-search" {
+                    app.settings_query = "spelling color".into();
+                }
+                if mode == "folder" {
+                    app.current_folder = Some(folder);
+                }
+                if mode == "draft" {
+                    app.start_fresh();
+                }
+                if mode == "mixed" {
+                    app.show_citations = true;
+                    app.citations = vec!["Example, Author. A source used in this document.".into()];
+                }
+                if mode == "apa" {
+                    app.style.apply_preset(PaperFormat::Apa);
+                    app.show_inspector = true;
+                }
+                if mode == "slash-menu" {
+                    app.slash_target = Some(5);
+                    app.blocks[5].text = "/".into();
+                    app.command_position = Pos2::new(310.0, 280.0);
+                    app.command_query = "/".into();
+                }
+                let ctx = egui::Context::default();
+                configure_fonts(&ctx);
+                app.apply_settings(&ctx);
+                let mut textures = HashMap::new();
+                let mut final_output = None;
+                for _ in 0..6 {
+                    final_output = Some(ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                Pos2::ZERO,
+                                pixels / scale,
+                            )),
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            app.workspace_view(ctx);
+                            if mode == "page-actions" {
+                                egui::Window::new("Page actions")
+                                    .default_pos(Pos2::new(300.0, 120.0))
+                                    .show(ctx, |ui| {
+                                        context_menu::page_menu(ui, &id, &app.workspace);
+                                    });
+                            }
+                            if mode == "slash-menu" {
+                                app.popups(ctx);
+                            }
+                        },
+                    ));
+                    // Keep texture deltas from every settling pass, but rasterize only the last.
+                    if let Some(output) = &mut final_output {
+                        for (texture, delta) in output.textures_delta.set.drain(..) {
+                            let [w, h] = delta.image.size();
+                            let colors: Vec<_> = match delta.image {
+                                egui::ImageData::Color(image) => image.pixels.clone(),
+                                egui::ImageData::Font(ref image) => {
+                                    image.srgba_pixels(None).collect()
+                                }
+                            };
+                            let bytes: Vec<_> = colors.iter().flat_map(|c| c.to_array()).collect();
+                            let update =
+                                image::RgbaImage::from_raw(w as u32, h as u32, bytes).unwrap();
+                            if let Some([x, y]) = delta.pos {
+                                image::imageops::replace(
+                                    textures.get_mut(&texture).unwrap(),
+                                    &update,
+                                    x as i64,
+                                    y as i64,
+                                );
+                            } else {
+                                textures.insert(texture, update);
+                            }
                         }
                     }
-                },
-            );
-            let image = rasterize(&ctx, output, &mut textures);
-            if pass == 11 {
-                let logo_pixels = (10..60)
-                    .flat_map(|y| (10..60).map(move |x| (x, y)))
-                    .filter(|&(x, y)| {
-                        let p = image.get_pixel(x, y);
-                        p[0] > 205 && p[1] > 215 && p[2] > 200
-                    })
-                    .count();
-                assert!(
-                    logo_pixels > 200,
-                    "The top-left logo must remain visible on {mode}"
-                );
+                }
+                let output = final_output.unwrap();
+                if mode == "mixed" {
+                    let title = output
+                        .shapes
+                        .iter()
+                        .find_map(|s| match &s.shape {
+                            egui::Shape::Text(t)
+                                if t.galley.job.text == app.title
+                                    && t.galley
+                                        .job
+                                        .sections
+                                        .first()
+                                        .is_some_and(|s| s.format.font_id.size > 25.0) =>
+                            {
+                                Some(t)
+                            }
+                            _ => None,
+                        })
+                        .expect("full title is painted");
+                    assert!(
+                        !title.galley.elided,
+                        "title must wrap rather than truncate at {pixels:?} / {scale}"
+                    );
+                    assert!(
+                        title.pos.x + title.galley.rect.right() < ctx.screen_rect().right(),
+                        "title extends outside screen"
+                    );
+                }
+                let image = rasterize(&ctx, output, &mut textures, pixels);
+                image
+                    .save(directory.join(format!(
+                        "{mode}-{}-{}.png",
+                        pixels.x as u32,
+                        (scale * 100.0) as u32
+                    )))
+                    .unwrap();
             }
-            image.save(directory.join(format!("{mode}.png"))).unwrap();
         }
     }
 }

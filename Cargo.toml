@@ -1,6 +1,6 @@
 [package]
 name = "flowrite"
-version = "0.2.4"
+version = "0.3.1"
 edition = "2021"
 description = "A fast, Notion-inspired desktop writing workspace"
 

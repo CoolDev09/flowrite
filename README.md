@@ -2,9 +2,11 @@
 
 A native Rust writing workspace with a dark, Notion-inspired editor, a document home page, academic presets, and PDF/Markdown export.
 
-Current version: **0.2.4**. This includes the 0.2.0 implementation batch and the compatibility and icon-toolbar updates, not completion of the entire requested roadmap. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for finished work and remaining details.
+Current source version: **0.3.1**. This adds full-height multiline quote rules, a top-right code Copy button, and smaller tab-strip icons to the 0.3.0 review update. All seven bugs and sixteen improvements from the supplied 0.2.4 review have implementation coverage; see [REVIEW_CHANGES.md](REVIEW_CHANGES.md) for that update's item-by-item changes and verification limits. All 77 tests pass, including regressions for these three refinements. The older, separate feature roadmap is tracked in [IMPLEMENTATION.md](IMPLEMENTATION.md) and is not wholly complete. The 0.3.1 executable remains a local review build; no downloadable GitHub release has been created for this version.
 
-[Download flowrite 0.2.4 for Windows](https://github.com/CoolDev09/flowrite/releases/download/v0.2.4/flowrite-0.2.4.exe), or browse the [release notes and older versions](https://github.com/CoolDev09/flowrite/releases).
+[Download the previously published flowrite 0.2.4 for Windows](https://github.com/CoolDev09/flowrite/releases/download/v0.2.4/flowrite-0.2.4.exe), or browse the [release notes and older versions](https://github.com/CoolDev09/flowrite/releases).
+
+**0.3.0 review update:** shared Home/editor shell, stable sidebar, compact optional/contextual formatting, readable list/gallery previews and sorting, responsive searchable Settings, temporary draft tabs and overflow, direct folder organization, writing review, exact PDF preview in your system viewer, and consistent accessible controls. Code/list indentation keeps editing focus; Markdown preserves literal punctuation and nested numbering; APA uses References throughout. PDF images and captions are centered together, with deliberate quote/task print styling. See the review checklist for details and test limitations.
 
 **0.2.4 Copy fix:** copying a code block no longer re-enters the UI context lock
 while recording the confirmation indicator. This fixes the app lockup on Copy;
@@ -61,9 +63,9 @@ to SVG, preserving the original artwork. Raw vendor files are excluded from Git.
 
 ## Your documents
 
-- The logo at the top left returns home. The sidebar is visible in documents, not on the home page. Folders appear as collapsible sidebar groups.
-- The start row has New folder, Blank page, MLA essay, and APA paper cards. New-page cards also work inside a folder.
-- A blank page stays a temporary draft until the first edit. Closing the last tab returns home; it does not create another empty page.
+- The logo and Home row return home. The same sidebar and compact header remain on Home, folder and document surfaces. Folders use collapsible groups; the current-page outline has its own section.
+- New page is the primary action; Templates offers Blank note, MLA essay and APA student paper. List/gallery view, sorting, and text/title search are visible on Home. Previews show readable content rather than miniature page screenshots.
+- A blank page has an immediate temporary draft tab and stays out of the library until its first edit. Closing an untouched draft creates no empty record; full-title tooltips and tab overflow distinguish long titles.
 - Right-click a page card, sidebar entry, or tab for the shared page menu: open, rename, duplicate, move, export, and delete. Rename currently uses a dialog.
 - Delete requires confirmation. Cancel has initial focus, Esc cancels, and Enter never confirms deletion. Deleting an externally opened page never deletes its original file. Deleted entries are **not yet restorable through a Trash interface**; their document files are retained in the library folder.
 - Autosave runs after a pause (default 1.5 seconds), on document switches, and on close. It writes changed documents independently. Undo retains the caret and groups consecutive typing.
@@ -80,18 +82,18 @@ If files cannot be opened, flowrite tries backups and explains recovery. The rec
 - Enter makes the next paragraph; Shift+Enter adds a line break. Empty blocks only show a writing hint when focused. Inactive empty blocks have no filler.
 - Arrows cross blocks at visual/text boundaries, retaining horizontal position for vertical movement. Image frames and dividers have whole-block keyboard focus. Shift-selection across blocks is pending.
 - Backspace at the beginning or Delete at the end merges adjacent text blocks, preserving Unicode and formatting. Non-text blocks are focused, not merged into text.
-- Tab/Shift+Tab indent/outdent lists up to six levels. Enter on an empty nested list outdents; an empty top-level item becomes a paragraph.
+- Tab/Shift+Tab indent/outdent lists up to six levels and retain the caret. Enter on an empty nested list outdents; an empty top-level item becomes a paragraph.
 - Code has a language selector, wrap toggle, and Copy button. Enter adds a line, Tab inserts four spaces, and Ctrl+Enter or Enter on an empty final line exits. Three backticks then Enter also creates code.
 - Callouts have a tinted container and colored bar with Note, Tip, Warning, Important, and Neutral variants. They support multiline rich text and code-like exit behavior, with licensed Flaticon icons.
 - Image offers Inline, Full width, Square, 4:3, 16:9, Circle, and Rounded frames. Choose a file, drop one onto a frame, or paste a clipboard image with the frame focused. Right-click to replace, change frame, or add a caption. Imports are resized to at most 2000 pixels per dimension.
-- Select text for bold, italic, underline, color, or highlight. Without a selection these apply to the block. Color also offers block/page backgrounds and clear formatting. Custom color wheels/recent colors are pending.
+- Select text for contextual bold, italic, underline, color, or highlight. Toggle the optional formatting bar with the header Formatting button. Without a selection, formatting applies to the block. Color also offers block/page backgrounds and clear formatting. Custom color wheels/recent colors are pending.
 - Find highlights exact matches; replace supports case and whole-word matching, Replace, and Replace all.
 
 MLA/APA presets use Liberation Serif (Times-compatible metrics), double spacing, one-inch margins, and half-inch first-line indentation. New headings use today's date and Settings defaults for name/instructor/course. Adjust details in Page setup and follow your instructor's requirements.
 
 ## Proofing and settings
 
-Proofing is offline. Red spelling underlines come from `spellbook` with the SCOWL/Hunspell US English dictionary; blue grammar underlines come from `nlprule` and LanguageTool-derived English rules. Checking runs in the background on changed blocks. Right-click an issue for suggestions, ignore controls, or a custom dictionary addition. F7 checks/navigates issues.
+Proofing is offline English (US). Red spelling underlines come from `spellbook` with the SCOWL/Hunspell US English dictionary; blue grammar underlines come from `nlprule` and LanguageTool-derived English rules. Checking runs in the background on changed blocks. Right-click an issue for suggestions, ignore controls, or a custom dictionary addition; More > Review spelling & grammar opens a compact issue list with language/severity labels. F7 checks/navigates issues. Default underlines are quieter and new custom dictionaries recognize Flowrite.
 
 Writing & proofing settings include independent spelling/grammar switches, highlight-only mode (no replacements or explanations), rule categories, underline appearance, debounce, ignored entries, and dictionary import/export. Settings apply immediately and save locally to `settings.json`.
 
@@ -101,7 +103,7 @@ Other settings cover startup, export folders, heading defaults/date format, dark
 
 Paste one ready-made citation per entry in Citations. Entries are alphabetized by default and use hanging indents. PDF starts Works Cited/References on a new page. A citation generator and in-text citation picker are pending.
 
-PDF embeds the same fonts as the editor and supports Letter/A4, academic headers, rich text, nested lists, code/callout containers, images, and captions. It defaults to black on white; optionally use document page colors. Markdown preserves styles, links, fenced code/language, alert callouts, lists, and citations. Images go in a neighboring `_images` folder with cropped PNG files. A suffix avoids overwriting existing asset folders. Markdown ignores colors. DOCX and system Print remain pending.
+PDF embeds the same fonts as the editor and supports Letter/A4, academic headers, rich text, nested lists, code/callout containers, images, and captions. It defaults to black on white; optionally use document page colors. Paper preview opens a temporary PDF of the current in-memory document in the system PDF viewer, using the exact export layout without saving or editing the document. The writing view itself is not paginated, and presets do not certify all academic requirements. Markdown preserves deliberate styles and links while escaping literal punctuation, and retains nested/mixed/multiline lists. Images go in a neighboring `_images` folder with cropped PNG files. A suffix avoids overwriting existing asset folders. Markdown ignores colors. DOCX and system Print remain pending.
 
 ## Shortcuts
 

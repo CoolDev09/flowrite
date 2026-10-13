@@ -67,6 +67,7 @@ pub(super) struct Appearance {
     pub folders: bool,
     pub high_contrast: bool,
     pub hand_pointer: bool,
+    pub sort: usize,
 }
 impl Default for Appearance {
     fn default() -> Self {
@@ -74,13 +75,14 @@ impl Default for Appearance {
             dim_page: false,
             accent: 0,
             scale: 1.0,
-            list_view: false,
+            list_view: true,
             recent_limit: 12,
             thumbnails: true,
             sidebar_width: 222.0,
             folders: true,
             high_contrast: false,
             hand_pointer: true,
+            sort: 0,
         }
     }
 }
@@ -98,14 +100,15 @@ pub(super) struct Editor {
     pub characters: bool,
     pub reading_time: bool,
     pub word_goal: usize,
+    pub toolbar: bool,
 }
 impl Default for Editor {
     fn default() -> Self {
         Self {
-            font: "Liberation Serif".into(),
+            font: "Liberation Sans".into(),
             size: 12.0,
-            spacing: 1.15,
-            margin: 1.0,
+            spacing: 1.4,
+            margin: 0.75,
             markdown: true,
             slash: true,
             handles: true,
@@ -113,6 +116,7 @@ impl Default for Editor {
             characters: true,
             reading_time: true,
             word_goal: 0,
+            toolbar: false,
         }
     }
 }
@@ -200,7 +204,7 @@ impl Default for Proofing {
             as_you_type: true,
             debounce: 0.4,
             dotted: false,
-            opacity: 0.9,
+            opacity: 0.65,
             spelling_color: [235, 107, 107],
             grammar_color: [113, 174, 232],
             skip_caps: true,
@@ -208,7 +212,7 @@ impl Default for Proofing {
             categories: [true, true, true, true, true, false],
             ignored_words: Vec::new(),
             ignored_rules: Vec::new(),
-            dictionary: Vec::new(),
+            dictionary: vec!["Flowrite".into()],
         }
     }
 }
